@@ -299,7 +299,7 @@ body {
 <div id="loading-overlay">
   <div class="spinner"></div>
   <div class="load-title">Loading AI Models</div>
-  <div class="load-sub" id="load-sub">Downloading face detection weights...</div>
+  <div class="load-sub" id="load-sub">Starting dashboard...</div>
 </div>
 
 <!-- Report Modal -->
@@ -354,7 +354,7 @@ body {
   <div class="topbar-right">
     <button class="btn btn-ghost"   id="btnReset"  onclick="resetSession()">Reset</button>
     <button class="btn btn-danger"  id="btnPause"  onclick="togglePause()">Pause</button>
-    <button class="btn btn-green"   id="btnCamera" onclick="startCamera()" disabled>Use Webcam</button>
+    <button class="btn btn-green"   id="btnCamera" onclick="connectPython()">Python AI</button>
     <button class="btn btn-primary" onclick="openReport()">Generate Report</button>
   </div>
 </div>
@@ -391,13 +391,12 @@ body {
       <span id="alertText">Low attention — please focus.</span>
     </div>
 
-    <!-- Camera preview (live mode) -->
+    <!-- Camera preview (Python AI live mode) -->
     <div id="camSection" style="display:none">
-      <div class="sec-label" style="margin-top:.1rem">Live Feed</div>
+      <div class="sec-label" style="margin-top:.1rem">Live Feed — Python AI</div>
       <div class="cam-wrap">
-        <video id="video" autoplay muted playsinline></video>
-        <canvas id="overlay"></canvas>
-        <div class="cam-badge" id="camBadge">DETECTING...</div>
+        <img id="pyFrame" style="display:block;width:100%;height:140px;object-fit:cover;background:#000;" alt="Python MediaPipe feed">
+        <div class="cam-badge" id="camBadge">CONNECTING...</div>
         <div class="no-face-pill" id="noFacePill">NO FACE</div>
       </div>
     </div>
@@ -429,7 +428,7 @@ body {
 
     <div class="mode-note" id="modeNote">
       <strong>Demo Mode:</strong> Simulated attention data running.<br>
-      Click <code>Use Webcam</code> to enable real AI detection via your laptop camera.
+      Run <code>python server.py</code>, then click <code>Python AI</code> to enable real MediaPipe detection.
     </div>
   </div>
 
@@ -525,14 +524,13 @@ body {
   </div>
 </div>
 
-<!-- face-api.js (async, used only in live mode) -->
-<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js" async id="faceApiScript"></script>
+<!-- Socket.IO client — connects to Python backend (server.py) -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
 <script>
 'use strict';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const MODEL_URL     = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
 const MAX_PTS       = 120;
 const EAR_THRESH    = 0.22;
 const MAR_THRESH    = 0.60;
@@ -770,84 +768,92 @@ function simulateTick() {
   drawGraph();
 }
 
-// ── Live mode (face-api.js) ───────────────────────────────────────────────────
-let liveMode=false, rafId=null, blinkF=0, yawnOn=false, distOn=false;
-let scoreWin=new Array(SCORE_WIN).fill(100);
-const video=document.getElementById('video');
-const oCanvas=document.getElementById('overlay');
-const oCtx=oCanvas.getContext('2d');
+// ── Python AI mode (Socket.IO → MediaPipe on Python server) ──────────────────
+let liveMode=false, socket=null;
 
-const CONTOURS=[[36,37,38,39,40,41],[42,43,44,45,46,47],
-  [48,49,50,51,52,53,54,55,56,57,58,59],[60,61,62,63,64,65,66,67],
-  [17,18,19,20,21],[22,23,24,25,26],[27,28,29,30],[31,32,33,34,35],
-  [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]];
-
-function drawLandmarks(pts) {
-  oCtx.fillStyle='#00D264';
-  pts.forEach(p => { oCtx.beginPath(); oCtx.arc(p.x,p.y,1.5,0,Math.PI*2); oCtx.fill(); });
-  oCtx.strokeStyle='rgba(0,210,100,0.5)'; oCtx.lineWidth=1;
-  CONTOURS.forEach(c => {
-    oCtx.beginPath();
-    c.forEach((i,n)=>n===0?oCtx.moveTo(pts[i].x,pts[i].y):oCtx.lineTo(pts[i].x,pts[i].y));
-    if (c.length<=8) oCtx.closePath(); oCtx.stroke();
-  });
-}
-
-const Dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
-function earIdx(pts,idx){ return (Dist(pts[idx[1]],pts[idx[5]])+Dist(pts[idx[2]],pts[idx[4]]))/(2*Dist(pts[idx[0]],pts[idx[3]])); }
-function calcMAR(pts){ return (Dist(pts[50],pts[58])+Dist(pts[52],pts[56]))/(2*Dist(pts[48],pts[54])); }
-
-function applyLiveScore(ear,mar,yaw){
-  let penalty=0;
-  if (ear<EAR_THRESH) blinkF++; else { if (blinkF>=BLINK_F){blinks++;document.getElementById('blinkCount').textContent=blinks;if(blinks%3===0)addEvent('blink',`Blink (EAR ${ear.toFixed(2)})`);} blinkF=0; }
-  if (blinkF>=EYES_LONG_F) penalty+=25;
-  if (mar>MAR_THRESH){ if(!yawnOn){yawns++;yawnOn=true;document.getElementById('yawnCount').textContent=yawns;addEvent('yawn',`Yawn (MAR ${mar.toFixed(2)})`);} penalty+=15; } else yawnOn=false;
-  if (Math.abs(yaw)>YAW_THRESH){ if(!distOn){distractions++;distOn=true;document.getElementById('distractCount').textContent=distractions;addEvent('dist',`Head turned (yaw ${yaw.toFixed(0)}°)`);} penalty+=20; } else distOn=false;
-
-  const raw=Math.max(0,100-penalty);
-  scoreWin.push(raw); if(scoreWin.length>SCORE_WIN) scoreWin.shift();
-  return scoreWin.reduce((a,b)=>a+b,0)/scoreWin.length;
-}
-
-async function liveLoop() {
-  if (!liveMode) return;
-  const result = await faceapi
-    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:.45}))
-    .withFaceLandmarks();
-
-  const vw=video.videoWidth||240, vh=video.videoHeight||140;
-  oCanvas.width=vw; oCanvas.height=vh;
-  oCtx.clearRect(0,0,vw,vh);
-
-  let score,ear=.28,mar=.05,yaw=0,pitch=0;
-  if (result) {
-    const pts=result.landmarks.positions;
-    ear=(earIdx(pts,[36,37,38,39,40,41])+earIdx(pts,[42,43,44,45,46,47]))/2;
-    mar=calcMAR(pts);
-    yaw=(pts[30].x/vw-.5)*180;
-    pitch=(pts[30].y/vh-.5)*90;
-    score=applyLiveScore(ear,mar,yaw);
-    drawLandmarks(pts);
-    document.getElementById('noFacePill').style.display='none';
-    document.getElementById('camBadge').textContent=`SCORE ${Math.round(score)}%`;
-    document.getElementById('camBadge').style.color='var(--green)';
-  } else {
-    scoreWin.push(Math.max(0,(scoreWin[scoreWin.length-1]||100)-4));
-    if(scoreWin.length>SCORE_WIN)scoreWin.shift();
-    score=scoreWin.reduce((a,b)=>a+b,0)/scoreWin.length;
-    document.getElementById('noFacePill').style.display='block';
-    document.getElementById('camBadge').textContent='NO FACE';
-    document.getElementById('camBadge').style.color='var(--red)';
+function connectPython() {
+  if (typeof io === 'undefined') {
+    alert('Socket.IO not loaded. Check your internet connection and refresh.');
+    return;
   }
 
-  pushScore(score);
-  updateBioUI(ear,mar,yaw,pitch);
-  updateRing(score);
-  updateStats();
-  checkAlert(score);
-  drawGraph();
+  const btn = document.getElementById('btnCamera');
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
 
-  rafId=requestAnimationFrame(liveLoop);
+  try {
+    socket = io('http://localhost:5000', { timeout: 5000 });
+  } catch(e) {
+    alert('Cannot create socket: ' + e.message); btn.disabled=false; btn.textContent='Python AI'; return;
+  }
+
+  socket.on('connect', () => {
+    liveMode = true;
+    if (simIntervalId) { clearInterval(simIntervalId); simIntervalId=null; }
+    document.getElementById('camSection').style.display='block';
+    btn.textContent = 'Python AI Active';
+    document.getElementById('modeBadge').textContent='PYTHON AI';
+    document.getElementById('modeBadge').style.color='var(--green)';
+    document.getElementById('modeBadge').style.borderColor='rgba(0,210,100,.3)';
+    document.getElementById('modeNote').innerHTML=
+      '<strong>Live Mode:</strong> MediaPipe 468-point face mesh running via Python.<br>All AI processing done in Python — zero JavaScript AI.';
+    socket.emit('start');
+    addEvent('info','Connected to Python AI server — MediaPipe active');
+  });
+
+  socket.on('data', d => {
+    if (paused) return;
+
+    // Show annotated frame from Python (MediaPipe landmarks already drawn)
+    if (d.frame) document.getElementById('pyFrame').src='data:image/jpeg;base64,'+d.frame;
+
+    if (d.face) {
+      document.getElementById('noFacePill').style.display='none';
+      document.getElementById('camBadge').textContent='SCORE '+Math.round(d.score)+'%';
+      document.getElementById('camBadge').style.color='var(--green)';
+    } else {
+      document.getElementById('noFacePill').style.display='block';
+      document.getElementById('camBadge').textContent='NO FACE';
+      document.getElementById('camBadge').style.color='var(--red)';
+    }
+
+    // Sync counters from Python (only log events on increment)
+    if (d.blinks > blinks) {
+      blinks=d.blinks; document.getElementById('blinkCount').textContent=blinks;
+      if (blinks%3===0) addEvent('blink','Blink detected (EAR '+d.ear.toFixed(2)+')');
+    }
+    if (d.yawns > yawns) {
+      yawns=d.yawns; document.getElementById('yawnCount').textContent=yawns;
+      addEvent('yawn','Yawn detected (MAR '+d.mar.toFixed(2)+')');
+    }
+    if (d.distractions > distractions) {
+      distractions=d.distractions; document.getElementById('distractCount').textContent=distractions;
+      addEvent('dist','Distraction — head turned (yaw '+d.yaw.toFixed(0)+'°)');
+    }
+
+    pushScore(d.score);
+    updateBioUI(d.ear, d.mar, d.yaw, d.pitch);
+    updateRing(d.score);
+    updateStats();
+    checkAlert(d.score);
+    drawGraph();
+  });
+
+  socket.on('disconnect', () => {
+    liveMode=false;
+    document.getElementById('camSection').style.display='none';
+    btn.disabled=false; btn.textContent='Python AI';
+    document.getElementById('modeBadge').textContent='DEMO MODE';
+    document.getElementById('modeBadge').style.color='var(--cyan)';
+    document.getElementById('modeBadge').style.borderColor='rgba(0,212,255,.3)';
+    addEvent('info','Disconnected from Python server — demo mode resumed');
+    if (!simIntervalId) simIntervalId=setInterval(simulateTick,1000);
+  });
+
+  socket.on('connect_error', () => {
+    btn.disabled=false; btn.textContent='Python AI'; socket=null;
+    alert('Cannot reach Python server at localhost:5000.\n\nMake sure you have run:\n  python server.py\n\nThen click Python AI again.');
+  });
 }
 
 function updateBioUI(ear,mar,yaw,pitch) {
@@ -884,8 +890,6 @@ async function startCamera() {
 // ── Controls ──────────────────────────────────────────────────────────────────
 function togglePause() {
   paused=!paused;
-  if (liveMode && paused && rafId) { cancelAnimationFrame(rafId); rafId=null; }
-  else if (liveMode && !paused) liveLoop();
   document.getElementById('btnPause').textContent=paused?'Resume':'Pause';
   document.getElementById('btnPause').className=paused?'btn btn-primary':'btn btn-danger';
 }
@@ -959,31 +963,10 @@ function downloadReport() {
 
 document.getElementById('reportModal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeReport();});
 
-// ── Load face-api models ──────────────────────────────────────────────────────
-async function loadModels() {
-  const sub=document.getElementById('load-sub');
-  try {
-    await new Promise((res,rej)=>{
-      const s=document.getElementById('faceApiScript');
-      if (window.faceapi) return res();
-      s.onload=res; s.onerror=rej;
-    });
-    sub.textContent='Loading face detector...';
-    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-    sub.textContent='Loading landmark model...';
-    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-    document.getElementById('loading-overlay').classList.add('hidden');
-    document.getElementById('btnCamera').disabled=false;
-  } catch(e) {
-    sub.textContent='Model load failed. Check internet. Dashboard runs in Demo mode.';
-    setTimeout(()=>document.getElementById('loading-overlay').classList.add('hidden'),3000);
-    console.warn('face-api load failed:',e);
-  }
-}
-
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('resize', drawGraph);
-loadModels();
+// Hide loading overlay immediately — no model download needed
+document.getElementById('loading-overlay').classList.add('hidden');
 simIntervalId = setInterval(simulateTick, 1000);
 simulateTick();
 </script>

@@ -73,6 +73,12 @@ class AttentionDetector:
         self.current_score = 100.0
         self.face_detected = False
 
+        # Last biometric readings (exposed for server.py)
+        self.last_ear   = 0.0
+        self.last_mar   = 0.0
+        self.last_yaw   = 0.0
+        self.last_pitch = 0.0
+
         # Per-session history for report
         self.score_history     = []
         self.timestamp_history = []
@@ -108,9 +114,16 @@ class AttentionDetector:
         ear   = (ear_l + ear_r) / 2.0
         mar   = mouth_aspect_ratio(lm, w, h)
 
-        # --- Head yaw via nose-tip x offset ---
-        nose_x  = lm[NOSE_TIP].x   # 0-1
+        # --- Head yaw/pitch via nose-tip offset ---
+        nose_x  = lm[NOSE_TIP].x
+        nose_y  = lm[NOSE_TIP].y
         yaw_deg = abs((nose_x - 0.5) * 180)
+
+        # Store for external access (e.g. server.py)
+        self.last_ear   = ear
+        self.last_mar   = mar
+        self.last_yaw   = (nose_x - 0.5) * 180   # signed
+        self.last_pitch = (nose_y - 0.5) * 90    # signed
 
         # --- Blink detection ---
         blink_penalty = 0.0
