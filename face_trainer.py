@@ -24,9 +24,12 @@ import numpy as np
 from database import init_db, DB_PATH
 
 
-FACE_CASCADE = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
+try:
+    FACE_CASCADE = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+except Exception:
+    FACE_CASCADE = None
 MODEL_FILE  = "face_model.yml"
 LABELS_FILE = "face_labels.json"
 SAMPLES_NEEDED = 40
@@ -46,6 +49,11 @@ def _save_label_map(label_map: dict):
 
 def enroll_student(name: str):
     """Capture face samples from webcam and train/update the recogniser."""
+    if FACE_CASCADE is None:
+        print("\n  ERROR: opencv not properly installed.")
+        print("  Run: py -3.11 -m pip uninstall opencv-python opencv-contrib-python -y")
+        print("       py -3.11 -m pip install opencv-contrib-python")
+        return
     print(f"\n  Enrolling: {name}")
     print(f"  Look at the camera. Collecting {SAMPLES_NEEDED} samples...")
     print("  Press Q to cancel.\n")
