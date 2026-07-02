@@ -183,8 +183,11 @@ def _stream_loop(student_name: str):
             )
 
             # Encode frame as JPEG and send to browser
-            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            b64    = base64.b64encode(buf).decode()
+            ok_enc, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if not ok_enc or buf is None or len(buf) == 0:
+                time.sleep(0.066)
+                continue
+            b64 = base64.b64encode(buf.tobytes()).decode()
 
             socketio.emit("data", {
                 "frame":        b64,

@@ -804,6 +804,8 @@ function connectPython() {
     const name = document.getElementById('studentName').value.trim() || 'Student';
     if (simIntervalId) { clearInterval(simIntervalId); simIntervalId=null; }
     document.getElementById('camSection').style.display='block';
+    document.getElementById('camBadge').textContent='STARTING CAMERA...';
+    document.getElementById('camBadge').style.color='var(--cyan)';
     btn.textContent = 'Python AI Active';
     document.getElementById('modeBadge').textContent='PYTHON AI';
     document.getElementById('modeBadge').style.color='var(--green)';
@@ -820,7 +822,11 @@ function connectPython() {
     if (paused) return;
 
     // Show annotated frame from Python (MediaPipe landmarks already drawn)
-    if (d.frame) document.getElementById('pyFrame').src='data:image/jpeg;base64,'+d.frame;
+    if (d.frame) {
+      const img = document.getElementById('pyFrame');
+      img.src = 'data:image/jpeg;base64,' + d.frame;
+      img.style.display = 'block';
+    }
 
     if (d.face) {
       document.getElementById('noFacePill').style.display='none';
@@ -828,8 +834,8 @@ function connectPython() {
       document.getElementById('camBadge').style.color='var(--green)';
     } else {
       document.getElementById('noFacePill').style.display='block';
-      document.getElementById('camBadge').textContent='NO FACE';
-      document.getElementById('camBadge').style.color='var(--red)';
+      document.getElementById('camBadge').textContent='NO FACE — move closer';
+      document.getElementById('camBadge').style.color='var(--yellow)';
     }
 
     // Show recognised student name if face recognition is active
