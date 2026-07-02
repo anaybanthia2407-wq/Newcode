@@ -3,16 +3,10 @@ Face Enrollment Tool — AI Attention Detection System
 =====================================================
 Run this ONCE per student to register their face.
 
+Uses MediaPipe Face Detection (no Haar cascade files needed).
+
 Usage:
-    python face_trainer.py
-
-The script will:
-  1. Ask for the student's name
-  2. Open the webcam and capture 40 face samples
-  3. Train an LBPH recogniser and save it as face_model.yml
-  4. Store the student in the SQLite database
-
-To recognise students automatically, server.py loads face_model.yml at startup.
+    py -3.11 face_trainer.py
 """
 
 import cv2
@@ -21,18 +15,47 @@ import sqlite3
 import pickle
 import json
 import numpy as np
+import mediapipe as mp
 from database import init_db, DB_PATH
 
 
-try:
-    FACE_CASCADE = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
-except Exception:
-    FACE_CASCADE = None
-MODEL_FILE  = "face_model.yml"
-LABELS_FILE = "face_labels.json"
+MODEL_FILE     = "face_model.yml"
+LABELS_FILE    = "face_labels.json"
 SAMPLES_NEEDED = 40
+
+# Use MediaPipe face detection — no external XML files needed
+mp_face_det = mp.solutions.face_detection
+face_detector = mp_face_det.FaceDetection(
+    model_selection=0, min_detection_confidence=0.6
+)
+
+
+def _get_face_roi(frame):
+    """
+    Detect face using MediaPipe and return cropped 100x100 grayscale face ROI.
+    Returns None if no face found.
+    """
+    h, w = frame.shape[:2]
+    rgb     = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = face_detector.process(rgb)
+
+    if not results.detections:
+        return None, None
+
+    det  = results.detections[0]
+    bbox = det.location_data.relative_bounding_box
+
+    x1 = max(0, int(bbox.xmin * w))
+    y1 = max(0, int(bbox.ymin * h))
+    x2 = min(w, int((bbox.xmin + bbox.width)  * w))
+    y2 = min(h, int((bbox.ymin + bbox.height) * h))
+
+    if x2 <= x1 or y2 <= y1:
+        return None, None
+
+    gray    = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    face_roi = cv2.resize(gray[y1:y2, x1:x2], (100, 100))
+    return face_roi, (x1, y1, x2, y2)
 
 
 def _load_label_map() -> dict:
@@ -48,12 +71,7 @@ def _save_label_map(label_map: dict):
 
 
 def enroll_student(name: str):
-    """Capture face samples from webcam and train/update the recogniser."""
-    if FACE_CASCADE is None:
-        print("\n  ERROR: opencv not properly installed.")
-        print("  Run: py -3.11 -m pip uninstall opencv-python opencv-contrib-python -y")
-        print("       py -3.11 -m pip install opencv-contrib-python")
-        return
+    """Capture face samples via MediaPipe and train/update the LBPH recogniser."""
     print(f"\n  Enrolling: {name}")
     print(f"  Look at the camera. Collecting {SAMPLES_NEEDED} samples...")
     print("  Press Q to cancel.\n")
@@ -68,24 +86,25 @@ def enroll_student(name: str):
         ok, frame = cap.read()
         if not ok:
             continue
-        frame = cv2.flip(frame, 1)
-        gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
+        frame    = cv2.flip(frame, 1)
+        roi, box = _get_face_roi(frame)
 
-        for (x, y, w, h) in faces:
-            face_roi = gray[y:y+h, x:x+w]
-            face_roi = cv2.resize(face_roi, (100, 100))
-            samples.append(face_roi)
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 210, 80), 2)
+        if roi is not None:
+            samples.append(roi)
+            x1, y1, x2, y2 = box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 210, 80), 2)
 
         pct = int(len(samples) / SAMPLES_NEEDED * 100)
-        bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
+        bar = "#" * (pct // 5) + "-" * (20 - pct // 5)
         cv2.putText(frame, f"[{bar}] {pct}%  ({len(samples)}/{SAMPLES_NEEDED})",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 210, 80), 2)
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 210, 80), 2)
         cv2.putText(frame, f"Enrolling: {name}",
-                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (200, 200, 220), 1)
-        cv2.imshow("Face Enrollment  —  Press Q to cancel", frame)
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 220), 1)
+        if roi is None:
+            cv2.putText(frame, "No face detected — look at camera",
+                        (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 100, 230), 1)
 
+        cv2.imshow("Face Enrollment  (Press Q to cancel)", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             print("  Cancelled.")
             cap.release()
@@ -96,7 +115,7 @@ def enroll_student(name: str):
     cv2.destroyAllWindows()
 
     if not samples:
-        print("  No face detected. Try better lighting and face the camera directly.")
+        print("  No face detected. Improve lighting and face the camera directly.")
         return
 
     # Save samples to database
@@ -117,8 +136,6 @@ def enroll_student(name: str):
     conn.close()
 
     print(f"  Saved {len(samples)} samples for {name} (id={student_id})")
-
-    # Retrain recogniser on ALL enrolled students
     _retrain_all()
 
 
@@ -137,8 +154,7 @@ def _retrain_all():
 
     all_faces, all_labels, label_map = [], [], {}
     for sid, name, blob in rows:
-        samples = pickle.loads(blob)
-        for s in samples:
+        for s in pickle.loads(blob):
             all_faces.append(s)
             all_labels.append(sid)
         label_map[sid] = name
@@ -146,18 +162,19 @@ def _retrain_all():
     try:
         recogniser = cv2.face.LBPHFaceRecognizer_create()
     except AttributeError:
-        print("\n  NOTE: opencv-contrib-python required for face recognition.")
-        print("  Run:  pip uninstall opencv-python -y && pip install opencv-contrib-python")
-        print("  Face model NOT saved — re-run this script after installing contrib.\n")
+        print("\n  opencv-contrib-python required.")
+        print("  Run: py -3.11 -m pip uninstall opencv-python -y")
+        print("       py -3.11 -m pip install opencv-contrib-python")
         return
 
     recogniser.train(all_faces, np.array(all_labels, dtype=np.int32))
     recogniser.save(MODEL_FILE)
     _save_label_map(label_map)
 
-    print(f"  Face model trained: {len(rows)} student(s) — saved to {MODEL_FILE}")
+    print(f"\n  Face model trained — {len(rows)} student(s) enrolled:")
     for sid, name in label_map.items():
         print(f"    [{sid}] {name}")
+    print(f"  Model saved to: {MODEL_FILE}\n")
 
 
 def list_students():
@@ -180,7 +197,7 @@ if __name__ == "__main__":
     print("╚══════════════════════════════════════════╝\n")
     print("  1. Enroll a new student")
     print("  2. List enrolled students")
-    print("  3. Retrain model (use if you added students manually)")
+    print("  3. Retrain model")
     print("  Q. Quit\n")
 
     choice = input("  Choose (1/2/3/Q): ").strip()
