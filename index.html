@@ -878,9 +878,16 @@ function connectPython() {
     if (!simIntervalId) simIntervalId=setInterval(simulateTick,1000);
   });
 
+  socket.on('camera_error', d => {
+    alert('Camera Error: ' + d.msg);
+    btn.disabled=false; btn.textContent='Python AI';
+    liveMode=false;
+    if (!simIntervalId) simIntervalId=setInterval(simulateTick,1000);
+  });
+
   socket.on('connect_error', () => {
     btn.disabled=false; btn.textContent='Python AI'; socket=null;
-    alert('Cannot reach Python server at localhost:5000.\n\nMake sure you have run:\n  python server.py\n\nThen click Python AI again.');
+    alert('Cannot reach Python server at localhost:5000.\n\nMake sure you have run:\n  py -3.11 server.py\n\nThen click Python AI again.');
   });
 }
 

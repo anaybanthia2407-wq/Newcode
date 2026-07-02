@@ -4,12 +4,12 @@ Python handles ALL AI detection (MediaPipe 468-point face mesh).
 
 Features:
   - Streams annotated frames + live stats to browser via WebSocket
-  - Logs every movement frame to SQLite database (database.py)
+  - Logs every movement frame to SQLite database
   - Auto-screenshot saved to screenshots/ when score < 50
   - Face recognition via LBPH model (face_model.yml) if available
 
 Usage:
-  python server.py
+  py -3.11 server.py
   Open browser at: http://localhost:5000
 """
 
@@ -21,39 +21,44 @@ import json
 from datetime import datetime
 
 import cv2
+import mediapipe as mp
 from flask import Flask, send_from_directory, jsonify
 from flask_socketio import SocketIO, emit
 
 from attention_detector import AttentionDetector
 from database import SessionDB, get_all_sessions, get_session_movements, get_session_screenshots
 
-# ── Setup ──────────────────────────────────────────────────────────────────────
+# ── App setup ──────────────────────────────────────────────────────────────────
 app = Flask(__name__, static_folder=".")
 app.config["SECRET_KEY"] = "attentionai-sciencefair"
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 SCREENSHOT_DIR   = "screenshots"
-SCREENSHOT_SCORE = 50          # take screenshot when score drops below this
+SCREENSHOT_SCORE = 50
 MODEL_FILE       = "face_model.yml"
 LABELS_FILE      = "face_labels.json"
 
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
-_lock          = threading.Lock()
-_running       = False
-_session_db    = None
-_student_name  = "Student"
+_lock         = threading.Lock()
+_running      = False
 
-# ── Face recognition (optional) ────────────────────────────────────────────────
-_recogniser  = None
-_label_map   = {}
-_face_cascade = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+# ── Face recognition (optional, uses MediaPipe-based LBPH model) ───────────────
+_recogniser = None
+_label_map  = {}
+
+# MediaPipe face detection for recognition (no Haar cascade needed)
+_mp_face_det   = mp.solutions.face_detection
+_face_detector = _mp_face_det.FaceDetection(
+    model_selection=0, min_detection_confidence=0.6
 )
+
 
 def _load_face_model():
     global _recogniser, _label_map
     if not os.path.exists(MODEL_FILE):
+        print("  No face model found — face recognition disabled.")
+        print("  Run: py -3.11 face_trainer.py  to enroll students.")
         return
     try:
         rec = cv2.face.LBPHFaceRecognizer_create()
@@ -65,28 +70,53 @@ def _load_face_model():
         print(f"  Face model loaded: {len(_label_map)} student(s) — {list(_label_map.values())}")
     except AttributeError:
         print("  Face recognition disabled (opencv-contrib-python not installed).")
+    except Exception as e:
+        print(f"  Face model load error: {e}")
 
 
-def _recognise_face(gray_frame):
-    """Return (name, confidence) for the most prominent face, or (None, 0)."""
+def _recognise_face(frame):
+    """Use MediaPipe to detect face, then LBPH to recognise. Returns name or None."""
     if _recogniser is None:
-        return None, 0
-    faces = _face_cascade.detectMultiScale(gray_frame, scaleFactor=1.3, minNeighbors=5)
-    best_name, best_conf = None, 999
-    for (x, y, w, h) in faces:
-        roi  = cv2.resize(gray_frame[y:y+h, x:x+w], (100, 100))
-        sid, conf = _recogniser.predict(roi)
-        if conf < best_conf:
-            best_conf = conf
-            best_name = _label_map.get(sid, "Unknown")
-    return (best_name, best_conf) if best_conf < 80 else (None, best_conf)
+        return None
+    h, w = frame.shape[:2]
+    rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    res  = _face_detector.process(rgb)
+    if not res.detections:
+        return None
+    det  = res.detections[0].location_data.relative_bounding_box
+    x1   = max(0, int(det.xmin * w))
+    y1   = max(0, int(det.ymin * h))
+    x2   = min(w, int((det.xmin + det.width) * w))
+    y2   = min(h, int((det.ymin + det.height) * h))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    roi  = cv2.resize(gray[y1:y2, x1:x2], (100, 100))
+    sid, conf = _recogniser.predict(roi)
+    return _label_map.get(sid) if conf < 80 else None
+
+
+# ── Camera open helper ─────────────────────────────────────────────────────────
+def _open_camera():
+    """Try camera indices 0, 1, 2 and return the first one that works."""
+    for idx in range(3):
+        cap = cv2.VideoCapture(idx)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            if ret:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                print(f"  Camera opened on index {idx}")
+                return cap
+        cap.release()
+    return None
 
 
 # ── Screenshot helper ──────────────────────────────────────────────────────────
 _last_screenshot_time = 0
-SCREENSHOT_COOLDOWN   = 10    # seconds between screenshots
+SCREENSHOT_COOLDOWN   = 10
 
-def _maybe_screenshot(frame, score, session_db: SessionDB):
+def _maybe_screenshot(frame, score, session_db):
     global _last_screenshot_time
     now = time.time()
     if score < SCREENSHOT_SCORE and (now - _last_screenshot_time) >= SCREENSHOT_COOLDOWN:
@@ -97,27 +127,30 @@ def _maybe_screenshot(frame, score, session_db: SessionDB):
         cv2.imwrite(filepath, frame)
         session_db.log_screenshot(score, filepath)
         socketio.emit("screenshot", {
-            "path":  filepath,
-            "score": round(score, 1),
-            "time":  stamp,
+            "path": filepath, "score": round(score, 1), "time": stamp
         })
-        print(f"  Screenshot saved: {filepath}  (score={score:.1f})")
+        print(f"  Screenshot: {filepath}  (score={score:.0f})")
 
 
 # ── Main detection loop ────────────────────────────────────────────────────────
 def _stream_loop(student_name: str):
-    global _running, _session_db
+    global _running
 
-    detector    = AttentionDetector()
-    session_db  = SessionDB(student_name)
-    _session_db = session_db
+    # Open webcam
+    cap = _open_camera()
+    if cap is None:
+        socketio.emit("camera_error", {
+            "msg": "Cannot open webcam. Make sure no other app (Zoom, Teams) is using it."
+        })
+        print("  ERROR: Could not open any camera.")
+        with _lock:
+            _running = False
+        return
 
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-    frame_count  = 0
-    recognised   = student_name   # start with provided name; update via face recog
+    detector   = AttentionDetector()
+    session_db = SessionDB(student_name)
+    recognised = student_name
+    frame_count = 0
 
     try:
         while _running:
@@ -126,29 +159,20 @@ def _stream_loop(student_name: str):
                 time.sleep(0.05)
                 continue
 
-            frame    = cv2.flip(frame, 1)
+            frame = cv2.flip(frame, 1)
             annotated, score, face_detected = detector.process_frame(frame)
 
-            # ── Face recognition (every 30 frames to save CPU) ────────────────
+            # Face recognition every 30 frames
             frame_count += 1
             if frame_count % 30 == 0 and face_detected:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                name, conf = _recognise_face(gray)
+                name = _recognise_face(frame)
                 if name:
                     recognised = name
-                    cv2.putText(annotated, f"{name} ({conf:.0f})",
-                                (10, annotated.shape[0] - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 210, 80), 2)
 
-            # ── Screenshot on low attention ───────────────────────────────────
+            # Auto screenshot on low attention
             _maybe_screenshot(frame, score, session_db)
 
-            # ── Log movement to database ──────────────────────────────────────
-            event = None
-            if detector.blink_count  > 0 and detector.blink_count  % 1 == 0: event = "blink"
-            if detector.yawn_count   > 0 and not event: event = "yawn"
-            if detector.distraction_events > 0 and not event: event = "distraction"
-
+            # Log movement to database
             session_db.log_movement(
                 timestamp = time.time() - detector.session_start,
                 score     = score,
@@ -156,10 +180,9 @@ def _stream_loop(student_name: str):
                 mar       = detector.last_mar,
                 yaw       = detector.last_yaw,
                 pitch     = detector.last_pitch,
-                event     = event,
             )
 
-            # ── Encode & stream frame to browser ──────────────────────────────
+            # Encode frame as JPEG and send to browser
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
             b64    = base64.b64encode(buf).decode()
 
@@ -190,7 +213,7 @@ def _stream_loop(student_name: str):
         )
         cap.release()
         detector.release()
-        print(f"  Session ended for {student_name}. Data saved to database.")
+        print(f"  Session ended for {student_name}.")
 
 
 # ── Flask routes ───────────────────────────────────────────────────────────────
@@ -198,16 +221,13 @@ def _stream_loop(student_name: str):
 def index():
     return send_from_directory(".", "index.html")
 
-
 @app.route("/api/sessions")
 def api_sessions():
     return jsonify(get_all_sessions())
 
-
 @app.route("/api/sessions/<int:sid>/movements")
 def api_movements(sid):
     return jsonify(get_session_movements(sid))
-
 
 @app.route("/api/sessions/<int:sid>/screenshots")
 def api_screenshots(sid):
@@ -217,22 +237,20 @@ def api_screenshots(sid):
 # ── Socket.IO events ───────────────────────────────────────────────────────────
 @socketio.on("start")
 def on_start(data=None):
-    global _running, _student_name
+    global _running
     name = (data or {}).get("name", "Student").strip() or "Student"
-    _student_name = name
     with _lock:
         if not _running:
             _running = True
             threading.Thread(target=_stream_loop, args=(name,), daemon=True).start()
-    emit("status", {"msg": f"Python AI started — session for {name}"})
-
+    emit("status", {"msg": f"Starting Python AI for {name}..."})
 
 @socketio.on("stop")
 def on_stop():
     global _running
     with _lock:
         _running = False
-    emit("status", {"msg": "Camera stopped — session saved to database"})
+    emit("status", {"msg": "Camera stopped — session saved."})
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -240,7 +258,7 @@ if __name__ == "__main__":
     _load_face_model()
     print("\n  AttentionAI — Python Backend Server")
     print("  MediaPipe 468-point face mesh active")
-    print(f"  Screenshots saved to: {SCREENSHOT_DIR}/  (when score < {SCREENSHOT_SCORE})")
+    print(f"  Screenshots folder: {SCREENSHOT_DIR}/")
     print("  Database: attention_data.db")
     print("  Open your browser at: http://localhost:5000\n")
     socketio.run(app, host="0.0.0.0", port=5000, debug=False)
