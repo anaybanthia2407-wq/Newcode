@@ -344,14 +344,26 @@ body {
   </div>
 </div>
 
+<!-- Screenshot toast notification -->
+<div id="screenshotToast" style="display:none;position:fixed;top:70px;right:20px;z-index:999;
+     background:#111827;border:1px solid var(--red);border-radius:8px;padding:.6rem 1rem;
+     color:var(--red);font-family:var(--mono);font-size:.75rem;box-shadow:0 4px 20px rgba(230,57,70,.3)">
+  📸 Screenshot saved — score below 50
+</div>
+
 <!-- Topbar -->
 <div class="topbar">
   <div class="topbar-left">
     <div class="logo"><span class="logo-dot"></span>AttentionAI</div>
     <div class="session-badge" id="sessionTimer">00:00:00</div>
     <div class="session-badge" id="modeBadge" style="color:var(--cyan);border-color:rgba(0,212,255,.3)">DEMO MODE</div>
+    <div class="session-badge" id="studentBadge" style="display:none;color:var(--green);border-color:rgba(0,210,100,.3)"></div>
   </div>
   <div class="topbar-right">
+    <input id="studentName" type="text" placeholder="Student name..." maxlength="30"
+           style="background:var(--card);border:1px solid var(--border2);border-radius:6px;
+                  color:var(--text);font-family:var(--mono);font-size:.75rem;
+                  padding:.35rem .7rem;width:150px;outline:none;">
     <button class="btn btn-ghost"   id="btnReset"  onclick="resetSession()">Reset</button>
     <button class="btn btn-danger"  id="btnPause"  onclick="togglePause()">Pause</button>
     <button class="btn btn-green"   id="btnCamera" onclick="connectPython()">Python AI</button>
@@ -789,16 +801,19 @@ function connectPython() {
 
   socket.on('connect', () => {
     liveMode = true;
+    const name = document.getElementById('studentName').value.trim() || 'Student';
     if (simIntervalId) { clearInterval(simIntervalId); simIntervalId=null; }
     document.getElementById('camSection').style.display='block';
     btn.textContent = 'Python AI Active';
     document.getElementById('modeBadge').textContent='PYTHON AI';
     document.getElementById('modeBadge').style.color='var(--green)';
     document.getElementById('modeBadge').style.borderColor='rgba(0,210,100,.3)';
+    document.getElementById('studentBadge').style.display='';
+    document.getElementById('studentBadge').textContent='Student: '+name;
     document.getElementById('modeNote').innerHTML=
       '<strong>Live Mode:</strong> MediaPipe 468-point face mesh running via Python.<br>All AI processing done in Python — zero JavaScript AI.';
-    socket.emit('start');
-    addEvent('info','Connected to Python AI server — MediaPipe active');
+    socket.emit('start', {name: name});
+    addEvent('info','Connected to Python AI server — session for '+name);
   });
 
   socket.on('data', d => {
@@ -815,6 +830,11 @@ function connectPython() {
       document.getElementById('noFacePill').style.display='block';
       document.getElementById('camBadge').textContent='NO FACE';
       document.getElementById('camBadge').style.color='var(--red)';
+    }
+
+    // Show recognised student name if face recognition is active
+    if (d.recognised && d.recognised !== document.getElementById('studentBadge').textContent.replace('Student: ','')) {
+      document.getElementById('studentBadge').textContent='Student: '+d.recognised;
     }
 
     // Sync counters from Python (only log events on increment)
@@ -839,14 +859,22 @@ function connectPython() {
     drawGraph();
   });
 
+  socket.on('screenshot', d => {
+    addEvent('alert', `Screenshot saved — score ${d.score}% (${d.path})`);
+    const toast = document.getElementById('screenshotToast');
+    toast.style.display='block';
+    setTimeout(()=>toast.style.display='none', 4000);
+  });
+
   socket.on('disconnect', () => {
     liveMode=false;
     document.getElementById('camSection').style.display='none';
+    document.getElementById('studentBadge').style.display='none';
     btn.disabled=false; btn.textContent='Python AI';
     document.getElementById('modeBadge').textContent='DEMO MODE';
     document.getElementById('modeBadge').style.color='var(--cyan)';
     document.getElementById('modeBadge').style.borderColor='rgba(0,212,255,.3)';
-    addEvent('info','Disconnected from Python server — demo mode resumed');
+    addEvent('info','Disconnected from Python server — session saved to database');
     if (!simIntervalId) simIntervalId=setInterval(simulateTick,1000);
   });
 
