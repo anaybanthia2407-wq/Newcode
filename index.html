@@ -145,6 +145,41 @@ body {
   font-family:var(--mono); font-size:.55rem; font-weight:600;
   padding:2px 7px; border-radius:4px; display:none;
 }
+.fs-btn {
+  position:absolute; top:6px; right:6px;
+  background:rgba(13,19,33,.80); border:1px solid var(--border2);
+  border-radius:4px; padding:3px 6px; cursor:pointer;
+  font-size:.75rem; color:var(--cyan); line-height:1;
+  transition:background .15s, color .15s;
+  z-index:10;
+}
+.fs-btn:hover { background:rgba(0,212,255,.18); color:#fff; }
+
+/* Fullscreen overlay styles */
+#camWrap:fullscreen,
+#camWrap:-webkit-full-screen {
+  background:#000;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:0; border:none;
+}
+#camWrap:fullscreen #pyFrame,
+#camWrap:-webkit-full-screen #pyFrame {
+  width:100vw !important;
+  height:100vh !important;
+  object-fit:contain !important;
+}
+#camWrap:fullscreen .cam-badge,
+#camWrap:-webkit-full-screen .cam-badge {
+  font-size:.8rem; padding:4px 12px; bottom:14px; left:14px;
+}
+#camWrap:fullscreen .no-face-pill,
+#camWrap:-webkit-full-screen .no-face-pill {
+  font-size:.8rem; padding:4px 12px; bottom:14px; right:14px;
+}
+#camWrap:fullscreen .fs-btn,
+#camWrap:-webkit-full-screen .fs-btn {
+  font-size:1rem; padding:6px 10px; top:12px; right:12px;
+}
 
 /* ── ALERT BANNER ── */
 .alert-banner {
@@ -406,10 +441,11 @@ body {
     <!-- Camera preview (Python AI live mode) -->
     <div id="camSection" style="display:none">
       <div class="sec-label" style="margin-top:.1rem">Live Feed — Python AI</div>
-      <div class="cam-wrap">
+      <div class="cam-wrap" id="camWrap">
         <img id="pyFrame" style="display:block;width:100%;height:140px;object-fit:cover;background:#000;" alt="Python MediaPipe feed">
         <div class="cam-badge" id="camBadge">CONNECTING...</div>
         <div class="no-face-pill" id="noFacePill">NO FACE</div>
+        <button class="fs-btn" id="fsBtn" onclick="toggleCamFullscreen()" title="Fullscreen">⛶</button>
       </div>
     </div>
 
@@ -926,6 +962,27 @@ async function startCamera() {
   document.getElementById('modeBadge').style.borderColor='rgba(0,210,100,.3)';
   document.getElementById('modeNote').innerHTML='<strong>Live Mode:</strong> Real AI face detection running via your webcam.<br>MediaPipe <code>68-point</code> facial landmarks active.';
   liveLoop();
+}
+
+// ── Fullscreen camera ──────────────────────────────────────────────────────────
+function toggleCamFullscreen() {
+  const wrap = document.getElementById('camWrap');
+  const btn  = document.getElementById('fsBtn');
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    (wrap.requestFullscreen || wrap.webkitRequestFullscreen).call(wrap);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  }
+}
+
+document.addEventListener('fullscreenchange', _onFsChange);
+document.addEventListener('webkitfullscreenchange', _onFsChange);
+function _onFsChange() {
+  const btn = document.getElementById('fsBtn');
+  if (!btn) return;
+  const inFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  btn.textContent = inFs ? '✕' : '⛶';
+  btn.title       = inFs ? 'Exit Fullscreen' : 'Fullscreen';
 }
 
 // ── Controls ──────────────────────────────────────────────────────────────────
