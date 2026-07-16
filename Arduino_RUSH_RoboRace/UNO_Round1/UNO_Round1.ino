@@ -20,17 +20,11 @@
       ENA / ENB -> tied directly to 5V (full-speed only,
                    no PWM speed control pins were wired)
 
-    Left Ultrasonic Sensor (mounted on the left servo horn,
-    held pointing sideways-left):
+    Left Ultrasonic Sensor (mounted fixed, pointing sideways-left,
+    no servo):
       TRIG -> D8
       ECHO -> D9
-
-    Left servo (just holds the sensor at a fixed angle - no
-    sweeping this round):
-      Left servo -> A1
 */
-
-#include <Servo.h>
 
 // ---------- L298N motor driver ----------
 const uint8_t IN1 = 4; // left motor forward
@@ -41,14 +35,6 @@ const uint8_t IN4 = 7; // right motor reverse
 // ---------- Left ultrasonic sensor ----------
 const uint8_t LEFT_TRIG = 8;
 const uint8_t LEFT_ECHO = 9;
-
-// ---------- Left servo ----------
-const uint8_t LEFT_SERVO_PIN = A1;
-Servo leftServo;
-
-// Fixed mounting angle - depends on how the sensor sits on the
-// servo horn, check physically and adjust.
-const int LEFT_SIDE_ANGLE = 180; // aims the left sensor straight out to the left
 
 // ---------- Tunable (cm) ----------
 const int LEFT_WALL_CM = 20; // left sensor reading at or below this = "wall detected"
@@ -63,9 +49,6 @@ void setup() {
 
   pinMode(LEFT_TRIG, OUTPUT);
   pinMode(LEFT_ECHO, INPUT);
-
-  leftServo.attach(LEFT_SERVO_PIN);
-  leftServo.write(LEFT_SIDE_ANGLE);
 
   stopMotors();
   delay(START_DELAY_MS);
