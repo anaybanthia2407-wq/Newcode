@@ -4,15 +4,19 @@
   Standalone Uno-only sketch - the Nano (IR array + colour
   sensor) and the right ultrasonic sensor are both unused here.
 
-  Left ultrasonic (fixed pointing sideways-left) hugs whatever
-  wall is beside the robot on the left, rechecked every loop:
-    distance < TOO_CLOSE_CM        -> turn right slightly (steer
-                                       away) until back at 10cm
-    distance == 0 (nothing in range) -> turn left slightly (steer
-                                       toward the wall) to reacquire it
-    otherwise (>= 10cm, wall seen)  -> go straight
-  This repeats continuously, so the robot oscillates gently
-  between these three states to stay roughly 10cm off the wall.
+  Two left-side ultrasonic sensors, both fixed pointing sideways-
+  left (no servo): the original LEFT sensor (near the front) and
+  a new MIDDLE sensor (mounted in the middle of the chassis),
+  rechecked every loop:
+    left distance < TOO_CLOSE_CM     -> turn right slightly (steer
+                                         away) until back at 10cm
+    BOTH left AND middle read 0
+    (nothing in range on either one) -> turn left slightly (steer
+                                         toward the wall) to reacquire it
+    otherwise                        -> go straight
+  Requiring both sensors to lose the wall before turning left
+  avoids a false "wall lost" turn from a single sensor's blind
+  spot or a momentary bad reading.
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -23,10 +27,14 @@
       ENA / ENB -> tied directly to 5V (full-speed only,
                    no PWM speed control pins were wired)
 
-    Left Ultrasonic Sensor (mounted fixed, pointing sideways-left,
-    no servo):
+    Left Ultrasonic Sensor (front, fixed pointing sideways-left):
       TRIG -> D8
       ECHO -> D9
+
+    Middle Ultrasonic Sensor (middle of the chassis, fixed
+    pointing sideways-left):
+      TRIG -> D2
+      ECHO -> D3
 */
 
 // ---------- L298N motor driver ----------
@@ -35,9 +43,11 @@ const uint8_t IN2 = 5; // right motor reverse
 const uint8_t IN3 = 6; // left motor forward
 const uint8_t IN4 = 7; // left motor reverse
 
-// ---------- Left ultrasonic sensor ----------
+// ---------- Left ultrasonic sensors ----------
 const uint8_t LEFT_TRIG = 8;
 const uint8_t LEFT_ECHO = 9;
+const uint8_t MIDDLE_TRIG = 2;
+const uint8_t MIDDLE_ECHO = 3;
 
 // ---------- Tunable (cm) ----------
 const int TOO_CLOSE_CM = 10; // below this -> steer away; this is also the target hugging distance
@@ -52,6 +62,8 @@ void setup() {
 
   pinMode(LEFT_TRIG, OUTPUT);
   pinMode(LEFT_ECHO, INPUT);
+  pinMode(MIDDLE_TRIG, OUTPUT);
+  pinMode(MIDDLE_ECHO, INPUT);
 
   stopMotors();
   delay(START_DELAY_MS);
@@ -59,11 +71,12 @@ void setup() {
 
 void loop() {
   long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
+  long middleDist = readDistanceCm(MIDDLE_TRIG, MIDDLE_ECHO);
 
   if (leftDist > 0 && leftDist < TOO_CLOSE_CM) {
     turnRightSlightly();  // too close to the wall - steer away
-  } else if (leftDist == 0) {
-    turnLeftSlightly();   // wall lost - steer back toward it
+  } else if (leftDist == 0 && middleDist == 0) {
+    turnLeftSlightly();   // both sensors lost the wall - steer back toward it
   } else {
     bothForward();        // holding a good distance - straight ahead
   }
