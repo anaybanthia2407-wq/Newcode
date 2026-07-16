@@ -2,18 +2,16 @@
   Arduino UNO - RUSH Robo Race Main Controller (Round 1: Qualifier)
   ---------------------------------------------------
   Standalone Uno-only sketch - the Nano (IR array + colour
-  sensor), the original left ultrasonic sensor, and the right
-  ultrasonic sensor are all unused here. Only the MIDDLE
-  ultrasonic sensor drives behaviour:
-    object detected (reading > 0 and <= OBJECT_DETECT_CM) -> go forward
-    object not detected (reading 0/timeout, or farther than
-    OBJECT_DETECT_CM)                                      -> turn left
-  Checked continuously every loop, no pulsing - a straight
-  continuous pivot while turning left. Note: a continuous pivot
-  never translates the robot's position, so if no wall is in
-  range from wherever it stops, it will spin in place until one
-  comes back into view (this was previously mitigated with
-  pulsing, which has been removed here per request).
+  sensor) and the right ultrasonic sensor are both unused here.
+
+  Left ultrasonic (fixed pointing sideways-left) hugs whatever
+  wall is beside the robot on the left:
+    wall detected within range -> drive both wheels forward at
+    full speed
+    wall not detected (too far / lost it) -> keep the LEFT wheel
+    driving forward but at half speed (via its ENA PWM pin) while
+    the RIGHT wheel stays at full speed, curving the robot back
+    left until the wall is picked up again
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -21,13 +19,14 @@
       IN2 -> D5   (right motor reverse)
       IN3 -> D6   (left motor forward)
       IN4 -> D7   (left motor reverse)
-      ENA / ENB -> tied directly to 5V (full-speed only,
-                   no PWM speed control pins were wired)
+      ENA -> D3   (left motor speed, PWM)
+      ENB -> tied directly to 5V (right motor stays full-speed,
+             no PWM control was wired for it)
 
-    Middle Ultrasonic Sensor (middle of the chassis, fixed
-    pointing sideways-left):
-      TRIG -> D2
-      ECHO -> D3
+    Left Ultrasonic Sensor (mounted fixed, pointing sideways-left,
+    no servo):
+      TRIG -> D8
+      ECHO -> D9
 */
 
 // ---------- L298N motor driver ----------
@@ -35,13 +34,18 @@ const uint8_t IN1 = 4; // right motor forward
 const uint8_t IN2 = 5; // right motor reverse
 const uint8_t IN3 = 6; // left motor forward
 const uint8_t IN4 = 7; // left motor reverse
+const uint8_t LEFT_ENA = 3; // left motor speed (PWM)
 
-// ---------- Middle ultrasonic sensor ----------
-const uint8_t MIDDLE_TRIG = 2;
-const uint8_t MIDDLE_ECHO = 3;
+// ---------- Left ultrasonic sensor ----------
+const uint8_t LEFT_TRIG = 8;
+const uint8_t LEFT_ECHO = 9;
 
 // ---------- Tunable (cm) ----------
-const int OBJECT_DETECT_CM = 30; // reading at or below this = object detected
+const int LEFT_WALL_CM = 20; // left sensor reading at or below this = "wall detected"
+
+// ---------- Left motor speed (PWM, 0-255) ----------
+const uint8_t LEFT_FULL_SPEED = 255;
+const uint8_t LEFT_HALF_SPEED = 127; // used instead of fully stopping the left wheel while curving
 
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
@@ -50,22 +54,23 @@ void setup() {
   pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
+  pinMode(LEFT_ENA, OUTPUT);
 
-  pinMode(MIDDLE_TRIG, OUTPUT);
-  pinMode(MIDDLE_ECHO, INPUT);
+  pinMode(LEFT_TRIG, OUTPUT);
+  pinMode(LEFT_ECHO, INPUT);
 
   stopMotors();
   delay(START_DELAY_MS);
 }
 
 void loop() {
-  long middleDist = readDistanceCm(MIDDLE_TRIG, MIDDLE_ECHO);
-  bool objectDetected = (middleDist > 0 && middleDist <= OBJECT_DETECT_CM);
+  long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
+  bool leftWallDetected = (leftDist > 0 && leftDist <= LEFT_WALL_CM);
 
-  if (objectDetected) {
+  if (leftWallDetected) {
     bothForward();
   } else {
-    turnLeftSlightly();
+    curveTowardLeftWall();
   }
 }
 
@@ -85,25 +90,29 @@ long readDistanceCm(uint8_t trigPin, uint8_t echoPin) {
 }
 
 // ---------------------------------------------------
-// Motor primitives (L298N, direction pins only)
+// Motor primitives (L298N)
 // ---------------------------------------------------
 void bothForward() {
+  analogWrite(LEFT_ENA, LEFT_FULL_SPEED);
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
 }
 
-void turnLeftSlightly() {
-  // Left wheel (IN3/IN4) stopped, right wheel (IN1/IN2) keeps
-  // driving forward - the robot pivots left, back toward the wall.
+void curveTowardLeftWall() {
+  // Left wheel (IN3/IN4) kept forward but slowed to half speed via
+  // ENA, right wheel (IN1/IN2) stays at full speed - the robot arcs
+  // left until the left ultrasonic finds the wall again.
+  analogWrite(LEFT_ENA, LEFT_HALF_SPEED);
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
+  digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
 }
 
 void stopMotors() {
+  analogWrite(LEFT_ENA, LEFT_FULL_SPEED);
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
