@@ -63,6 +63,12 @@ const uint8_t IN4 = 4;
 const int OBSTACLE_DISTANCE_CM = 15;   // stop/avoid if closer than this
 const bool LINE_IS_LOW = true;         // IR sensor reports LOW when it sees the black line; flip to false if your modules are active-HIGH
 
+// Colour-triggered bypass manoeuvre timing - tune these to your robot's
+// speed and the physical size of the coloured obstacles on the track.
+const unsigned long BYPASS_TURN_MS = 400;          // time to turn ~90 degrees
+const unsigned long BYPASS_FORWARD_MS = 500;       // time to drive past the obstacle's width
+const unsigned long BYPASS_REJOIN_TIMEOUT_MS = 2000; // safety cap while hunting for the line again
+
 // ---------- Data received from the Nano ----------
 int irValue[5] = {1, 1, 1, 1, 1}; // 1 = no line, 0 = line, per LINE_IS_LOW convention
 String colour = "NONE";
@@ -95,9 +101,12 @@ void loop() {
   long frontDistance2 = readDistanceCm(TRIG2, ECHO2);
 
   if (colour == "RED") {
-    // Example colour-triggered behaviour: treat red as a stop signal.
-    // Customize this block for whatever colour logic you need.
-    stopMotors();
+    bypassObstacle(true);  // red obstacle: go around it via a left turn
+    return;
+  }
+
+  if (colour == "GREEN") {
+    bypassObstacle(false); // green obstacle: go around it via a right turn
     return;
   }
 
@@ -216,6 +225,52 @@ void avoidObstacle() {
     turnRight();
   }
   delay(300);
+  stopMotors();
+}
+
+// ---------------------------------------------------
+// Colour-triggered bypass: steer around a coloured obstacle
+// rather than just stopping at it.
+//   turnLeftFirst = true  -> red obstacle:   turn left, pass it, turn
+//                            right to angle back, then rejoin the line
+//   turnLeftFirst = false -> green obstacle: turn right, pass it, turn
+//                            left to angle back, then rejoin the line
+// ---------------------------------------------------
+void bypassObstacle(bool turnLeftFirst) {
+  stopMotors();
+  delay(150);
+
+  // Step 1: turn away from the track, toward the clear side
+  if (turnLeftFirst) turnLeft(); else turnRight();
+  delay(BYPASS_TURN_MS);
+  stopMotors();
+  delay(100);
+
+  // Step 2: drive forward to clear the width of the obstacle
+  moveForward();
+  delay(BYPASS_FORWARD_MS);
+  stopMotors();
+  delay(100);
+
+  // Step 3: turn back the opposite way to angle toward the track again
+  if (turnLeftFirst) turnRight(); else turnLeft();
+  delay(BYPASS_TURN_MS);
+  stopMotors();
+  delay(100);
+
+  // Discard any stale/partial Nano frames buffered during the fixed
+  // turns above, so the line-reacquire check below uses fresh data.
+  while (Serial.available()) Serial.read();
+
+  // Step 4: drive forward until the centre IR sensor reacquires the
+  // line, or bail out after a timeout so the robot doesn't run away.
+  unsigned long rejoinStart = millis();
+  moveForward();
+  while (millis() - rejoinStart < BYPASS_REJOIN_TIMEOUT_MS) {
+    readNanoData();
+    if (isLine(irValue[2])) break;
+    delay(20);
+  }
   stopMotors();
 }
 
