@@ -20,6 +20,15 @@
   momentary bad reading. There is no "too close" check in this
   version - it only ever goes straight or turns left.
 
+  While lost, the turn is pulsed (short turn burst, short forward
+  burst, repeat) rather than held as a continuous pivot. A held
+  pivot only rotates the robot in place around the stopped wheel -
+  it never actually moves the robot closer to any wall, so if the
+  wall is out of range in every direction from that exact spot
+  (an open corner, a gap, etc.) it just spins forever. Pulsing
+  forward progress in between turn bursts guarantees the robot
+  keeps moving until a wall comes back into range.
+
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
       IN1 -> D4   (right motor forward)
@@ -54,6 +63,10 @@ const uint8_t MIDDLE_ECHO = 3;
 // ---------- Tunable (cm) ----------
 const int WALL_LOST_CM = 30; // reading beyond this (or 0/timeout) = wall lost
 
+// ---------- Turn pulsing (guarantees forward progress while lost) ----------
+const unsigned long TURN_PULSE_MS = 150;    // how long each turn burst lasts
+const unsigned long FORWARD_PULSE_MS = 100; // brief forward drive between turn bursts
+
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
 void setup() {
@@ -79,9 +92,9 @@ void loop() {
   bool middleLost = (middleDist == 0 || middleDist > WALL_LOST_CM);
 
   if (leftLost && middleLost) {
-    turnLeftSlightly();   // both sensors lost the wall - steer back toward it
+    pulseTurnLeft();       // both sensors lost the wall - steer back toward it
   } else {
-    bothForward();        // wall seen by at least one sensor - straight ahead
+    bothForward();         // wall seen by at least one sensor - straight ahead
   }
 }
 
@@ -98,6 +111,18 @@ long readDistanceCm(uint8_t trigPin, uint8_t echoPin) {
   long duration = pulseIn(echoPin, HIGH, 25000UL); // 25ms timeout (~4m)
   if (duration == 0) return 0;
   return duration / 29 / 2; // speed of sound conversion to cm
+}
+
+// ---------------------------------------------------
+// Pulse the turn instead of holding a continuous pivot, so the
+// robot keeps making forward progress while lost rather than
+// spinning forever in one fixed spot.
+// ---------------------------------------------------
+void pulseTurnLeft() {
+  turnLeftSlightly();
+  delay(TURN_PULSE_MS);
+  bothForward();
+  delay(FORWARD_PULSE_MS);
 }
 
 // ---------------------------------------------------
