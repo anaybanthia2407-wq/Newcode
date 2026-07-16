@@ -8,14 +8,17 @@
   left (no servo): the original LEFT sensor (near the front) and
   a new MIDDLE sensor (mounted in the middle of the chassis),
   rechecked every loop:
-    BOTH left AND middle read 0
-    (nothing in range on either one) -> turn left slightly (steer
-                                         toward the wall) to reacquire it
-    otherwise                        -> go straight
-  Requiring both sensors to lose the wall before turning left
-  avoids a false "wall lost" turn from a single sensor's blind
-  spot or a momentary bad reading. There is no "too close" check
-  in this version - it only ever goes straight or turns left.
+    BOTH left AND middle are "lost" (reading > WALL_LOST_CM, or a
+    literal 0/timeout) -> turn left slightly (steer toward the
+                           wall) to reacquire it
+    otherwise           -> go straight
+  A literal 0/timeout alone is not a reliable "lost" signal inside
+  an enclosed track - the HC-SR04's ~4m range means it will almost
+  always see some surface, so WALL_LOST_CM is the real threshold.
+  Requiring both sensors to be lost before turning left avoids a
+  false "wall lost" turn from a single sensor's blind spot or a
+  momentary bad reading. There is no "too close" check in this
+  version - it only ever goes straight or turns left.
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -48,6 +51,9 @@ const uint8_t LEFT_ECHO = 9;
 const uint8_t MIDDLE_TRIG = 2;
 const uint8_t MIDDLE_ECHO = 3;
 
+// ---------- Tunable (cm) ----------
+const int WALL_LOST_CM = 30; // reading beyond this (or 0/timeout) = wall lost
+
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
 void setup() {
@@ -69,7 +75,10 @@ void loop() {
   long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
   long middleDist = readDistanceCm(MIDDLE_TRIG, MIDDLE_ECHO);
 
-  if (leftDist == 0 && middleDist == 0) {
+  bool leftLost = (leftDist == 0 || leftDist > WALL_LOST_CM);
+  bool middleLost = (middleDist == 0 || middleDist > WALL_LOST_CM);
+
+  if (leftLost && middleLost) {
     turnLeftSlightly();   // both sensors lost the wall - steer back toward it
   } else {
     bothForward();        // wall seen by at least one sensor - straight ahead
