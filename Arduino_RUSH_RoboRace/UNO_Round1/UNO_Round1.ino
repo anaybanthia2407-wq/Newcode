@@ -7,9 +7,15 @@
   Left ultrasonic (fixed pointing sideways-left) hugs whatever
   wall is beside the robot on the left:
     wall detected within range -> drive both wheels forward
-    wall not detected (too far / lost it) -> stop the LEFT wheel
-    and keep the RIGHT wheel driving forward, curving the robot
-    back left until the wall is picked up again
+    wall not detected (too far / lost it) -> pulse the turn:
+    short burst of "stop LEFT wheel, RIGHT wheel forward" (pivot),
+    then a short burst of both wheels forward, repeating until the
+    wall is picked up again. Pulsing (instead of holding the pivot
+    continuously) lets the robot translate forward between bursts,
+    tracing a wider arc so it doesn't swing into the wall on the
+    other side of the corridor. Pure timing tuning - there's no
+    sensor on the other side, so this is a best-effort widening,
+    not a measured clearance guarantee.
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -39,6 +45,10 @@ const uint8_t LEFT_ECHO = 9;
 // ---------- Tunable (cm) ----------
 const int LEFT_WALL_CM = 20; // left sensor reading at or below this = "wall detected"
 
+// ---------- Turn pulsing (widens the turn radius) ----------
+const unsigned long TURN_PULSE_MS = 150;    // how long each pivot burst lasts
+const unsigned long FORWARD_PULSE_MS = 100; // brief forward drive between pivot bursts
+
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
 void setup() {
@@ -61,7 +71,7 @@ void loop() {
   if (leftWallDetected) {
     bothForward();
   } else {
-    curveTowardLeftWall();
+    widenTurnTowardLeftWall();
   }
 }
 
@@ -78,6 +88,19 @@ long readDistanceCm(uint8_t trigPin, uint8_t echoPin) {
   long duration = pulseIn(echoPin, HIGH, 25000UL); // 25ms timeout (~4m)
   if (duration == 0) return 0;
   return duration / 29 / 2; // speed of sound conversion to cm
+}
+
+// ---------------------------------------------------
+// Pulse the pivot instead of holding it continuously, so the
+// robot also drives forward a little between bursts - this
+// traces a wider arc than a continuous in-place pivot, giving
+// more clearance from the wall on the other side of the corridor.
+// ---------------------------------------------------
+void widenTurnTowardLeftWall() {
+  curveTowardLeftWall();
+  delay(TURN_PULSE_MS);
+  bothForward();
+  delay(FORWARD_PULSE_MS);
 }
 
 // ---------------------------------------------------
