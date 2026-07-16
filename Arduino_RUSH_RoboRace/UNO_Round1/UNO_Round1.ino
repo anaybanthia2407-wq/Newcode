@@ -45,7 +45,7 @@ const int LEFT_WALL_CM = 20; // left sensor reading at or below this = "wall det
 
 // ---------- Left motor speed (PWM, 0-255) ----------
 const uint8_t LEFT_FULL_SPEED = 255;
-const uint8_t LEFT_HALF_SPEED = 127; // used instead of fully stopping the left wheel while curving
+const uint8_t LEFT_HALF_SPEED = 75; // used instead of fully stopping the left wheel while curving
 
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
