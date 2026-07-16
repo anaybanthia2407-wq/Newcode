@@ -5,17 +5,14 @@
   sensor) and the right ultrasonic sensor are both unused here.
 
   Left ultrasonic (fixed pointing sideways-left) hugs whatever
-  wall is beside the robot on the left:
-    wall detected within range -> drive both wheels forward
-    wall not detected (too far / lost it) -> pulse the turn:
-    short burst of "stop LEFT wheel, RIGHT wheel forward" (pivot),
-    then a short burst of both wheels forward, repeating until the
-    wall is picked up again. Pulsing (instead of holding the pivot
-    continuously) lets the robot translate forward between bursts,
-    tracing a wider arc so it doesn't swing into the wall on the
-    other side of the corridor. Pure timing tuning - there's no
-    sensor on the other side, so this is a best-effort widening,
-    not a measured clearance guarantee.
+  wall is beside the robot on the left, rechecked every loop:
+    distance < TOO_CLOSE_CM        -> turn right slightly (steer
+                                       away) until back at 10cm
+    distance == 0 (nothing in range) -> turn left slightly (steer
+                                       toward the wall) to reacquire it
+    otherwise (>= 10cm, wall seen)  -> go straight
+  This repeats continuously, so the robot oscillates gently
+  between these three states to stay roughly 10cm off the wall.
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -43,11 +40,7 @@ const uint8_t LEFT_TRIG = 8;
 const uint8_t LEFT_ECHO = 9;
 
 // ---------- Tunable (cm) ----------
-const int LEFT_WALL_CM = 20; // left sensor reading at or below this = "wall detected"
-
-// ---------- Turn pulsing (widens the turn radius) ----------
-const unsigned long TURN_PULSE_MS = 150;    // how long each pivot burst lasts
-const unsigned long FORWARD_PULSE_MS = 100; // brief forward drive between pivot bursts
+const int TOO_CLOSE_CM = 10; // below this -> steer away; this is also the target hugging distance
 
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
@@ -66,12 +59,13 @@ void setup() {
 
 void loop() {
   long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
-  bool leftWallDetected = (leftDist > 0 && leftDist <= LEFT_WALL_CM);
 
-  if (leftWallDetected) {
-    bothForward();
+  if (leftDist > 0 && leftDist < TOO_CLOSE_CM) {
+    turnRightSlightly();  // too close to the wall - steer away
+  } else if (leftDist == 0) {
+    turnLeftSlightly();   // wall lost - steer back toward it
   } else {
-    widenTurnTowardLeftWall();
+    bothForward();        // holding a good distance - straight ahead
   }
 }
 
@@ -91,19 +85,6 @@ long readDistanceCm(uint8_t trigPin, uint8_t echoPin) {
 }
 
 // ---------------------------------------------------
-// Pulse the pivot instead of holding it continuously, so the
-// robot also drives forward a little between bursts - this
-// traces a wider arc than a continuous in-place pivot, giving
-// more clearance from the wall on the other side of the corridor.
-// ---------------------------------------------------
-void widenTurnTowardLeftWall() {
-  curveTowardLeftWall();
-  delay(TURN_PULSE_MS);
-  bothForward();
-  delay(FORWARD_PULSE_MS);
-}
-
-// ---------------------------------------------------
 // Motor primitives (L298N, direction pins only)
 // ---------------------------------------------------
 void bothForward() {
@@ -113,10 +94,18 @@ void bothForward() {
   digitalWrite(IN4, LOW);
 }
 
-void curveTowardLeftWall() {
+void turnRightSlightly() {
+  // Right wheel (IN1/IN2) stopped, left wheel (IN3/IN4) keeps
+  // driving forward - the robot pivots right, away from the wall.
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void turnLeftSlightly() {
   // Left wheel (IN3/IN4) stopped, right wheel (IN1/IN2) keeps
-  // driving forward - the robot arcs left until the left
-  // ultrasonic finds the wall again.
+  // driving forward - the robot pivots left, back toward the wall.
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
