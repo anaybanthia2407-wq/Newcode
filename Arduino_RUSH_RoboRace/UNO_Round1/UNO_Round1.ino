@@ -2,32 +2,18 @@
   Arduino UNO - RUSH Robo Race Main Controller (Round 1: Qualifier)
   ---------------------------------------------------
   Standalone Uno-only sketch - the Nano (IR array + colour
-  sensor) and the right ultrasonic sensor are both unused here.
-
-  Two left-side ultrasonic sensors, both fixed pointing sideways-
-  left (no servo): the original LEFT sensor (near the front) and
-  a new MIDDLE sensor (mounted in the middle of the chassis),
-  rechecked every loop:
-    BOTH left AND middle are "lost" (reading > WALL_LOST_CM, or a
-    literal 0/timeout) -> turn left slightly (steer toward the
-                           wall) to reacquire it
-    otherwise           -> go straight
-  A literal 0/timeout alone is not a reliable "lost" signal inside
-  an enclosed track - the HC-SR04's ~4m range means it will almost
-  always see some surface, so WALL_LOST_CM is the real threshold.
-  Requiring both sensors to be lost before turning left avoids a
-  false "wall lost" turn from a single sensor's blind spot or a
-  momentary bad reading. There is no "too close" check in this
-  version - it only ever goes straight or turns left.
-
-  While lost, the turn is pulsed (short turn burst, short forward
-  burst, repeat) rather than held as a continuous pivot. A held
-  pivot only rotates the robot in place around the stopped wheel -
-  it never actually moves the robot closer to any wall, so if the
-  wall is out of range in every direction from that exact spot
-  (an open corner, a gap, etc.) it just spins forever. Pulsing
-  forward progress in between turn bursts guarantees the robot
-  keeps moving until a wall comes back into range.
+  sensor), the original left ultrasonic sensor, and the right
+  ultrasonic sensor are all unused here. Only the MIDDLE
+  ultrasonic sensor drives behaviour:
+    object detected (reading > 0 and <= OBJECT_DETECT_CM) -> go forward
+    object not detected (reading 0/timeout, or farther than
+    OBJECT_DETECT_CM)                                      -> turn left
+  Checked continuously every loop, no pulsing - a straight
+  continuous pivot while turning left. Note: a continuous pivot
+  never translates the robot's position, so if no wall is in
+  range from wherever it stops, it will spin in place until one
+  comes back into view (this was previously mitigated with
+  pulsing, which has been removed here per request).
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -37,10 +23,6 @@
       IN4 -> D7   (left motor reverse)
       ENA / ENB -> tied directly to 5V (full-speed only,
                    no PWM speed control pins were wired)
-
-    Left Ultrasonic Sensor (front, fixed pointing sideways-left):
-      TRIG -> D8
-      ECHO -> D9
 
     Middle Ultrasonic Sensor (middle of the chassis, fixed
     pointing sideways-left):
@@ -54,18 +36,12 @@ const uint8_t IN2 = 5; // right motor reverse
 const uint8_t IN3 = 6; // left motor forward
 const uint8_t IN4 = 7; // left motor reverse
 
-// ---------- Left ultrasonic sensors ----------
-const uint8_t LEFT_TRIG = 8;
-const uint8_t LEFT_ECHO = 9;
+// ---------- Middle ultrasonic sensor ----------
 const uint8_t MIDDLE_TRIG = 2;
 const uint8_t MIDDLE_ECHO = 3;
 
 // ---------- Tunable (cm) ----------
-const int WALL_LOST_CM = 30; // reading beyond this (or 0/timeout) = wall lost
-
-// ---------- Turn pulsing (guarantees forward progress while lost) ----------
-const unsigned long TURN_PULSE_MS = 150;    // how long each turn burst lasts
-const unsigned long FORWARD_PULSE_MS = 100; // brief forward drive between turn bursts
+const int OBJECT_DETECT_CM = 30; // reading at or below this = object detected
 
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
@@ -75,8 +51,6 @@ void setup() {
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
 
-  pinMode(LEFT_TRIG, OUTPUT);
-  pinMode(LEFT_ECHO, INPUT);
   pinMode(MIDDLE_TRIG, OUTPUT);
   pinMode(MIDDLE_ECHO, INPUT);
 
@@ -85,16 +59,13 @@ void setup() {
 }
 
 void loop() {
-  long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
   long middleDist = readDistanceCm(MIDDLE_TRIG, MIDDLE_ECHO);
+  bool objectDetected = (middleDist > 0 && middleDist <= OBJECT_DETECT_CM);
 
-  bool leftLost = (leftDist == 0 || leftDist > WALL_LOST_CM);
-  bool middleLost = (middleDist == 0 || middleDist > WALL_LOST_CM);
-
-  if (leftLost && middleLost) {
-    pulseTurnLeft();       // both sensors lost the wall - steer back toward it
+  if (objectDetected) {
+    bothForward();
   } else {
-    bothForward();         // wall seen by at least one sensor - straight ahead
+    turnLeftSlightly();
   }
 }
 
@@ -111,18 +82,6 @@ long readDistanceCm(uint8_t trigPin, uint8_t echoPin) {
   long duration = pulseIn(echoPin, HIGH, 25000UL); // 25ms timeout (~4m)
   if (duration == 0) return 0;
   return duration / 29 / 2; // speed of sound conversion to cm
-}
-
-// ---------------------------------------------------
-// Pulse the turn instead of holding a continuous pivot, so the
-// robot keeps making forward progress while lost rather than
-// spinning forever in one fixed spot.
-// ---------------------------------------------------
-void pulseTurnLeft() {
-  turnLeftSlightly();
-  delay(TURN_PULSE_MS);
-  bothForward();
-  delay(FORWARD_PULSE_MS);
 }
 
 // ---------------------------------------------------
