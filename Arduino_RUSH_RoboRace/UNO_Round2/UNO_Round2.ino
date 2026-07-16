@@ -11,23 +11,27 @@
   Manoeuvre once RED or GREEN is seen:
     1. Stop.
     2. Back up slightly.
-    3. Sharp tank turn (one wheel forward, other backward) - left
+    3. Sharp tank turn AWAY from the wall (OUTWARD_TURN_MS) - left
        for red, right for green.
     4. Drive forward 0.75s - THIS is what has to get the obstacle
-       fully behind the car. SHARP_TURN_MS and this first
+       fully behind the car. OUTWARD_TURN_MS and this first
        CLEAR_FORWARD_MS burst are the two values to lengthen if
        the obstacle isn't completely cleared by the end of this
        step.
-    5. Sharp tank turn the OTHER way (equal duration to step 3,
-       so the heading change cancels out). Only runs once the
-       obstacle is already behind the car from step 4.
-    6. Drive forward 0.75s - this second burst is unrelated to
-       clearing the obstacle; it exists purely to close the gap
-       back to the wall that steps 3-4 opened up.
-  End state: same heading/distance from the wall as before the
-  obstacle, just moved forward and now on the other side of it,
-  with the obstacle behind the car. Control then returns to the
-  Round 1 wall follower.
+    5. Sharp tank turn back toward the wall, but for LONGER than
+       step 3 (RETURN_TURN_MS > OUTWARD_TURN_MS). Turning back by
+       only the same amount as step 3 only restores the original
+       heading (parallel to the wall) - the path stays parallel
+       but permanently offset, it never actually converges back
+       toward the wall. Turning back further than that angles the
+       heading in toward the wall so the next forward burst
+       actually closes the gap instead of just running alongside
+       it.
+    6. Drive forward 0.75s while angled in toward the wall, closing
+       the gap opened by steps 3-4.
+  End state: back at the wall-hugging distance, obstacle behind
+  the car. Control then returns to the Round 1 wall follower,
+  which takes over any small remaining correction.
 
   Wiring (Arduino Uno):
     L298N Motor Driver:
@@ -73,7 +77,8 @@ const uint8_t LEFT_HALF_SPEED = 75; // used instead of fully stopping the left w
 
 // ---------- Obstacle avoidance manoeuvre timing ----------
 const unsigned long REVERSE_MS = 300;        // brief back-up before turning
-const unsigned long SHARP_TURN_MS = 400;     // duration of each tank turn (tune this)
+const unsigned long OUTWARD_TURN_MS = 400;   // turn away from the wall to clear the obstacle
+const unsigned long RETURN_TURN_MS = 600;    // turn back toward the wall - keep this > OUTWARD_TURN_MS so the path actually converges back to the wall instead of just running parallel to it
 const unsigned long CLEAR_FORWARD_MS = 750;  // 0.75s forward burst, run twice
 
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
@@ -152,16 +157,17 @@ void avoidObstacle(bool turnLeftFirst) {
   // Turn away and drive clear - this pair must fully get the
   // obstacle behind the car by itself.
   if (turnLeftFirst) tankTurnLeft(); else tankTurnRight();
-  delay(SHARP_TURN_MS);
+  delay(OUTWARD_TURN_MS);
 
   bothForward();
   delay(CLEAR_FORWARD_MS);
 
-  // Turn back and drive forward again - purely to close the
-  // gap back to the wall now that the obstacle is already
-  // behind the car; unrelated to clearing the obstacle itself.
-  if (turnLeftFirst) tankTurnRight(); else tankTurnLeft(); // opposite turn, same duration
-  delay(SHARP_TURN_MS);
+  // Turn back toward the wall for LONGER than the outward turn,
+  // so the heading actually angles in toward the wall instead of
+  // just returning to parallel - then drive forward while angled
+  // in to actually close the gap.
+  if (turnLeftFirst) tankTurnRight(); else tankTurnLeft();
+  delay(RETURN_TURN_MS);
 
   bothForward();
   delay(CLEAR_FORWARD_MS);
