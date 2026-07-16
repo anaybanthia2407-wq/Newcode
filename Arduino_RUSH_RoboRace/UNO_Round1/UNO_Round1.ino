@@ -8,15 +8,14 @@
   left (no servo): the original LEFT sensor (near the front) and
   a new MIDDLE sensor (mounted in the middle of the chassis),
   rechecked every loop:
-    left distance < TOO_CLOSE_CM     -> turn right slightly (steer
-                                         away) until back at 10cm
     BOTH left AND middle read 0
     (nothing in range on either one) -> turn left slightly (steer
                                          toward the wall) to reacquire it
     otherwise                        -> go straight
   Requiring both sensors to lose the wall before turning left
   avoids a false "wall lost" turn from a single sensor's blind
-  spot or a momentary bad reading.
+  spot or a momentary bad reading. There is no "too close" check
+  in this version - it only ever goes straight or turns left.
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -49,9 +48,6 @@ const uint8_t LEFT_ECHO = 9;
 const uint8_t MIDDLE_TRIG = 2;
 const uint8_t MIDDLE_ECHO = 3;
 
-// ---------- Tunable (cm) ----------
-const int TOO_CLOSE_CM = 10; // below this -> steer away; this is also the target hugging distance
-
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
 void setup() {
@@ -73,12 +69,10 @@ void loop() {
   long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
   long middleDist = readDistanceCm(MIDDLE_TRIG, MIDDLE_ECHO);
 
-  if (leftDist > 0 && leftDist < TOO_CLOSE_CM) {
-    turnRightSlightly();  // too close to the wall - steer away
-  } else if (leftDist == 0 && middleDist == 0) {
+  if (leftDist == 0 && middleDist == 0) {
     turnLeftSlightly();   // both sensors lost the wall - steer back toward it
   } else {
-    bothForward();        // holding a good distance - straight ahead
+    bothForward();        // wall seen by at least one sensor - straight ahead
   }
 }
 
@@ -102,15 +96,6 @@ long readDistanceCm(uint8_t trigPin, uint8_t echoPin) {
 // ---------------------------------------------------
 void bothForward() {
   digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
-}
-
-void turnRightSlightly() {
-  // Right wheel (IN1/IN2) stopped, left wheel (IN3/IN4) keeps
-  // driving forward - the robot pivots right, away from the wall.
-  digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
