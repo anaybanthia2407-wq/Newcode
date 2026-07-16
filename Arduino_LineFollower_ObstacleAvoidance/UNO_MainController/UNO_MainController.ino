@@ -13,12 +13,12 @@
       TRIG -> D2
       ECHO -> D13
 
-    Ultrasonic Sensor 2 (side):
+    Ultrasonic Sensor 2 (front, second angle):
       TRIG -> D12
       ECHO -> D10
 
-    Servo 1 (pans Ultrasonic Sensor 1) -> D11
-    Servo 2 (pans Ultrasonic Sensor 2) -> D9
+    Servo 1 (pans Ultrasonic Sensor 1, swings left when scanning) -> D11
+    Servo 2 (pans Ultrasonic Sensor 2, swings right when scanning) -> D9
 
     L298N Motor Driver (direction pins):
       IN1 -> D7   (Motor A / left, forward)
@@ -91,7 +91,8 @@ void setup() {
 void loop() {
   readNanoData();
 
-  long frontDistance = readDistanceCm(TRIG1, ECHO1);
+  long frontDistance1 = readDistanceCm(TRIG1, ECHO1);
+  long frontDistance2 = readDistanceCm(TRIG2, ECHO2);
 
   if (colour == "RED") {
     // Example colour-triggered behaviour: treat red as a stop signal.
@@ -100,7 +101,11 @@ void loop() {
     return;
   }
 
-  if (frontDistance > 0 && frontDistance < OBSTACLE_DISTANCE_CM) {
+  bool obstacleDetected =
+      (frontDistance1 > 0 && frontDistance1 < OBSTACLE_DISTANCE_CM) ||
+      (frontDistance2 > 0 && frontDistance2 < OBSTACLE_DISTANCE_CM);
+
+  if (obstacleDetected) {
     avoidObstacle();
   } else {
     followLine();
@@ -186,22 +191,23 @@ bool isLine(int rawValue) {
 }
 
 // ---------------------------------------------------
-// Obstacle avoidance: stop, scan with the servo-mounted
-// ultrasonic sensors, then turn toward the clearer side.
+// Obstacle avoidance: stop, then swing both servo-mounted
+// ultrasonic sensors to opposite sides at once (Servo1/US1
+// left, Servo2/US2 right) and turn toward the clearer side.
 // ---------------------------------------------------
 void avoidObstacle() {
   stopMotors();
   delay(150);
 
-  servo1.write(150); // scan left
+  servo1.write(150); // US1 swings left
+  servo2.write(30);  // US2 swings right
   delay(300);
-  long leftDistance = readDistanceCm(TRIG1, ECHO1);
 
-  servo1.write(30); // scan right
-  delay(300);
-  long rightDistance = readDistanceCm(TRIG1, ECHO1);
+  long leftDistance = readDistanceCm(TRIG1, ECHO1);
+  long rightDistance = readDistanceCm(TRIG2, ECHO2);
 
   servo1.write(90); // recentre
+  servo2.write(90); // recentre
   delay(200);
 
   if (leftDistance == 0 || leftDistance > rightDistance) {
