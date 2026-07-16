@@ -13,13 +13,21 @@
     2. Back up slightly.
     3. Sharp tank turn (one wheel forward, other backward) - left
        for red, right for green.
-    4. Drive forward 0.75s.
+    4. Drive forward 0.75s - THIS is what has to get the obstacle
+       fully behind the car. SHARP_TURN_MS and this first
+       CLEAR_FORWARD_MS burst are the two values to lengthen if
+       the obstacle isn't completely cleared by the end of this
+       step.
     5. Sharp tank turn the OTHER way (equal duration to step 3,
-       so the heading change cancels out).
-    6. Drive forward 0.75s.
+       so the heading change cancels out). Only runs once the
+       obstacle is already behind the car from step 4.
+    6. Drive forward 0.75s - this second burst is unrelated to
+       clearing the obstacle; it exists purely to close the gap
+       back to the wall that steps 3-4 opened up.
   End state: same heading/distance from the wall as before the
-  obstacle, just moved forward and now on the other side of it.
-  Control then returns to the Round 1 wall follower.
+  obstacle, just moved forward and now on the other side of it,
+  with the obstacle behind the car. Control then returns to the
+  Round 1 wall follower.
 
   Wiring (Arduino Uno):
     L298N Motor Driver:
@@ -141,12 +149,17 @@ void avoidObstacle(bool turnLeftFirst) {
   moveBackward();
   delay(REVERSE_MS);
 
+  // Turn away and drive clear - this pair must fully get the
+  // obstacle behind the car by itself.
   if (turnLeftFirst) tankTurnLeft(); else tankTurnRight();
   delay(SHARP_TURN_MS);
 
   bothForward();
   delay(CLEAR_FORWARD_MS);
 
+  // Turn back and drive forward again - purely to close the
+  // gap back to the wall now that the obstacle is already
+  // behind the car; unrelated to clearing the obstacle itself.
   if (turnLeftFirst) tankTurnRight(); else tankTurnLeft(); // opposite turn, same duration
   delay(SHARP_TURN_MS);
 
