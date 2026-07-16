@@ -13,8 +13,10 @@
         wheel and keep the RIGHT wheel driving forward, curving
         the robot back left until the wall is picked up again
     - RIGHT ultrasonic (fixed pointing forward) is a pure safety
-      cutoff: if it reads closer than RIGHT_STOP_CM, kill both
-      motors immediately, overriding everything else.
+      check: if it reads closer than RIGHT_STOP_CM, both motors
+      pause briefly (RIGHT_STOP_PAUSE_MS), overriding everything
+      else, then the loop re-checks and drives again automatically
+      as soon as it's no longer that close - not a permanent stop.
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -68,9 +70,10 @@ const int LEFT_SIDE_ANGLE = 180;     // aims the left sensor straight out to the
 
 // ---------- Tunables (cm) ----------
 const int LEFT_WALL_CM = 20;  // left sensor reading at or below this = "wall detected"
-const int RIGHT_STOP_CM = 5;  // right sensor reading below this = emergency stop
+const int RIGHT_STOP_CM = 5;  // right sensor reading below this = pause
 
-const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
+const unsigned long RIGHT_STOP_PAUSE_MS = 300; // how long each pause lasts - not a permanent stop
+const unsigned long START_DELAY_MS = 3000;     // time to place the robot before it moves
 
 void setup() {
   pinMode(IN1, OUTPUT);
@@ -96,7 +99,10 @@ void loop() {
   long rightDist = readDistanceCm(RIGHT_TRIG, RIGHT_ECHO);
 
   if (rightDist > 0 && rightDist < RIGHT_STOP_CM) {
+    // Temporary pause, not a permanent stop - the loop re-checks
+    // right after this and drives again as soon as it's clear.
     stopMotors();
+    delay(RIGHT_STOP_PAUSE_MS);
     return;
   }
 
