@@ -13,10 +13,10 @@
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
-      IN1 -> D4   (left motor forward)
-      IN2 -> D5   (left motor reverse)
-      IN3 -> D6   (right motor forward)
-      IN4 -> D7   (right motor reverse)
+      IN1 -> D4   (right motor forward)
+      IN2 -> D5   (right motor reverse)
+      IN3 -> D6   (left motor forward)
+      IN4 -> D7   (left motor reverse)
       ENA / ENB -> tied directly to 5V (full-speed only,
                    no PWM speed control pins were wired)
 
@@ -27,10 +27,10 @@
 */
 
 // ---------- L298N motor driver ----------
-const uint8_t IN1 = 4; // left motor forward
-const uint8_t IN2 = 5; // left motor reverse
-const uint8_t IN3 = 6; // right motor forward
-const uint8_t IN4 = 7; // right motor reverse
+const uint8_t IN1 = 4; // right motor forward
+const uint8_t IN2 = 5; // right motor reverse
+const uint8_t IN3 = 6; // left motor forward
+const uint8_t IN4 = 7; // left motor reverse
 
 // ---------- Left ultrasonic sensor ----------
 const uint8_t LEFT_TRIG = 8;
@@ -91,11 +91,12 @@ void bothForward() {
 }
 
 void curveTowardLeftWall() {
-  // Left wheel stopped, right wheel keeps driving forward - the
-  // robot arcs left until the left ultrasonic finds the wall again.
-  digitalWrite(IN1, LOW);
+  // Left wheel (IN3/IN4) stopped, right wheel (IN1/IN2) keeps
+  // driving forward - the robot arcs left until the left
+  // ultrasonic finds the wall again.
+  digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH);
+  digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
 }
 
