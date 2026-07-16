@@ -7,9 +7,12 @@
   just races around the loop as fast as it safely can.
 
   Strategy: hug the inner island wall closely with one fixed
-  sideways-facing ultrasonic sensor, watch the outer wall from
-  a distance with the other, and use the forward-facing IR
-  bumper array as a last-resort "wall dead ahead" check.
+  sideways-facing ultrasonic sensor, and point the OTHER
+  ultrasonic sensor forward (not sideways) so it can spot an
+  approaching wall/corner from a real distance and turn in
+  time. The forward-facing IR bumper array is only a last-
+  resort backup - its detection range is too short to be the
+  primary collision sensor on its own.
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -28,9 +31,10 @@
       TRIG -> D8
       ECHO -> D9
 
-    Servos (each carries one ultrasonic sensor on its horn -
-    kept at a fixed sideways angle this round since there are
-    no obstacles to scan for yet):
+    Servos (each carries one ultrasonic sensor on its horn).
+    Whichever side is the ISLAND side gets held sideways (to
+    hug it); the other side gets held pointing forward (to
+    watch for the wall/corner ahead) - see ISLAND_ON_LEFT below:
       Right servo -> A0
       Left servo  -> A1
 
@@ -64,15 +68,19 @@ const uint8_t LEFT_SERVO_PIN = A1;
 Servo rightServo;
 Servo leftServo;
 
-// Angles that aim each ultrasonic sensor straight out to its
-// own side. Depends entirely on how the sensor is mounted on
-// the servo horn - check physically and adjust these two.
+// Angle that aims a sensor straight out to its own side (for
+// hugging the island), and the angle that aims it straight
+// forward (for spotting the wall/corner ahead). Depends
+// entirely on how each sensor is mounted on its servo horn -
+// check physically on the bench and adjust these.
 const int RIGHT_SIDE_ANGLE = 0;
 const int LEFT_SIDE_ANGLE = 180;
+const int RIGHT_FORWARD_ANGLE = 90;
+const int LEFT_FORWARD_ANGLE = 90;
 
 // ---------- Which side the island is on ----------
-// true  = robot loops with the island on its LEFT  (Left ultrasonic = inner-wall sensor)
-// false = robot loops with the island on its RIGHT (Right ultrasonic = inner-wall sensor)
+// true  = robot loops with the island on its LEFT  (Left ultrasonic hugs it, Right looks ahead)
+// false = robot loops with the island on its RIGHT (Right ultrasonic hugs it, Left looks ahead)
 // Set this to match whichever direction you actually drive the loop.
 const bool ISLAND_ON_LEFT = true;
 
@@ -80,13 +88,13 @@ const bool ISLAND_ON_LEFT = true;
 const bool IR_ACTIVE_HIGH = true; // set false if your module outputs LOW when it senses something close
 
 // ---------- Tunables (cm) ----------
-const int INNER_MIN_CM = 8;   // closer than this to the island -> steer away
-const int INNER_MAX_CM = 25;  // farther than this -> island corner has receded, steer back toward it
-const int OUTER_MIN_CM = 15;  // outer wall closer than this -> steer back toward the island
+const int INNER_MIN_CM = 8;    // closer than this to the island -> steer away
+const int INNER_MAX_CM = 25;   // farther than this -> island corner has receded, steer back toward it
+const int AHEAD_TURN_CM = 30;  // forward sensor sees a wall/corner closer than this -> start turning now
 
 // ---------- Motion timing (no encoders, no PWM speed control) ----------
 const unsigned long CORRECTION_TURN_MS = 120; // brief steering pulse for normal wall-hugging
-const unsigned long EMERGENCY_TURN_MS = 300;  // bigger turn when a wall is dead ahead
+const unsigned long EMERGENCY_TURN_MS = 300;  // bigger turn when a wall is dead ahead (IR bumper backup)
 const unsigned long START_DELAY_MS = 3000;    // time to place the robot on the track before it moves
 
 // ---------- Data from the Nano ----------
@@ -108,8 +116,14 @@ void setup() {
 
   rightServo.attach(RIGHT_SERVO_PIN);
   leftServo.attach(LEFT_SERVO_PIN);
-  rightServo.write(RIGHT_SIDE_ANGLE);
-  leftServo.write(LEFT_SIDE_ANGLE);
+
+  if (ISLAND_ON_LEFT) {
+    leftServo.write(LEFT_SIDE_ANGLE);       // hugs the island
+    rightServo.write(RIGHT_FORWARD_ANGLE);  // watches the wall/corner ahead
+  } else {
+    rightServo.write(RIGHT_SIDE_ANGLE);     // hugs the island
+    leftServo.write(LEFT_FORWARD_ANGLE);    // watches the wall/corner ahead
+  }
 
   stopMotors();
   delay(START_DELAY_MS);
@@ -122,26 +136,28 @@ void loop() {
   long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
 
   long islandDist = ISLAND_ON_LEFT ? leftDist : rightDist;
-  long outerDist  = ISLAND_ON_LEFT ? rightDist : leftDist;
+  long aheadDist   = ISLAND_ON_LEFT ? rightDist : leftDist;
 
   if (isAnyFrontWall()) {
-    // Wall dead ahead: steer away from the island until it clears.
+    // IR bumper backup: something is right against the front bumper.
+    // Should rarely fire now that aheadDist below gives real warning.
     turnAwayFromIsland();
     delay(EMERGENCY_TURN_MS);
     stopMotors();
     return;
   }
 
-  if (islandDist > 0 && islandDist < INNER_MIN_CM) {
+  if (aheadDist > 0 && aheadDist < AHEAD_TURN_CM) {
+    // Wall/corner coming up ahead - start turning to follow the loop
+    // around the island before we get any closer to it.
+    turnTowardIsland();
+    delay(CORRECTION_TURN_MS);
+  } else if (islandDist > 0 && islandDist < INNER_MIN_CM) {
     // Too close to the island - nudge away from it.
     turnAwayFromIsland();
     delay(CORRECTION_TURN_MS);
   } else if (islandDist == 0 || islandDist > INNER_MAX_CM) {
     // Island wall has receded (rounding its corner) - hug it around.
-    turnTowardIsland();
-    delay(CORRECTION_TURN_MS);
-  } else if (outerDist > 0 && outerDist < OUTER_MIN_CM) {
-    // Drifted too close to the outer wall - correct back inward.
     turnTowardIsland();
     delay(CORRECTION_TURN_MS);
   } else {
