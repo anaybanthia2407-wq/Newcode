@@ -1,17 +1,21 @@
 /*
   Arduino UNO - RUSH Robo Race Main Controller (Round 1: Qualifier)
   ---------------------------------------------------
-  Standalone Uno-only sketch - the Nano (IR array + colour
-  sensor) and the right ultrasonic sensor are both unused here.
+  The right ultrasonic sensor is still unused here. The Nano's
+  5-channel IR array (now angled down at the ground, close to the
+  surface, detecting the black boundary tape) is back in play as a
+  safety backstop on top of the normal wall-hugging:
 
-  Left ultrasonic (fixed pointing sideways-left) hugs whatever
-  wall is beside the robot on the left:
-    wall detected within range -> drive both wheels forward at
-    full speed
-    wall not detected (too far / lost it) -> keep the LEFT wheel
-    driving forward but at half speed (via its ENA PWM pin) while
-    the RIGHT wheel stays at full speed, curving the robot back
-    left until the wall is picked up again
+    boundary tape detected by ANY IR channel -> override everything
+    and pivot sharply back toward the wall (the ultrasonic-based
+    hugging let the robot drift too close to the outer edge)
+    otherwise -> normal Round 1 wall-following:
+      left ultrasonic wall detected within range -> both wheels
+      forward at full speed
+      wall not detected (too far / lost it) -> keep the LEFT wheel
+      driving forward but at half speed (via its ENA PWM pin) while
+      the RIGHT wheel stays at full speed, curving the robot back
+      left until the wall is picked up again
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -27,6 +31,15 @@
     no servo):
       TRIG -> D8
       ECHO -> D9
+
+    Serial link to NANO (5-channel IR boundary array):
+      Uno TX (D1) -> Nano RX (D0)
+      Uno RX (D0) -> Nano TX (D1)
+      GND <-> GND (common ground, required)
+
+  NOTE: Because this link uses the hardware Serial pins (D0/D1),
+  disconnect the cross-wiring to the NANO (or unplug the Uno's
+  USB) while uploading this sketch.
 */
 
 // ---------- L298N motor driver ----------
@@ -47,9 +60,20 @@ const int LEFT_WALL_CM = 20; // left sensor reading at or below this = "wall det
 const uint8_t LEFT_FULL_SPEED = 255;
 const uint8_t LEFT_HALF_SPEED = 75; // used instead of fully stopping the left wheel while curving
 
+// ---------- IR boundary sensor polarity ----------
+const bool IR_ACTIVE_HIGH = true; // set false if your IR module outputs LOW when it senses the black tape
+
+// ---------- Boundary correction timing ----------
+const unsigned long BOUNDARY_TURN_MS = 300; // how long to pivot back toward the wall once tape is seen
+
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
+// ---------- Data from the Nano ----------
+int irRight2Left[5] = {0, 0, 0, 0, 0}; // s1 (extreme right) .. s5 (extreme left)
+
 void setup() {
+  Serial.begin(9600); // link to Nano
+
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT);
@@ -64,6 +88,14 @@ void setup() {
 }
 
 void loop() {
+  readNanoData();
+
+  if (isBoundaryDetected()) {
+    turnLeftPivot(); // sharp correction back toward the wall
+    delay(BOUNDARY_TURN_MS);
+    return;
+  }
+
   long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
   bool leftWallDetected = (leftDist > 0 && leftDist <= LEFT_WALL_CM);
 
@@ -72,6 +104,48 @@ void loop() {
   } else {
     curveTowardLeftWall();
   }
+}
+
+// ---------------------------------------------------
+// Serial: parse "s1,s2,s3,s4,s5" from the Nano
+// (s1 = extreme right ... s5 = extreme left)
+// ---------------------------------------------------
+void readNanoData() {
+  static String buffer = "";
+
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') {
+      parseNanoFrame(buffer);
+      buffer = "";
+    } else if (c != '\r') {
+      buffer += c;
+    }
+  }
+}
+
+void parseNanoFrame(String frame) {
+  int start = 0;
+  int field = 0;
+
+  for (int i = 0; i < frame.length() && field < 4; i++) {
+    if (frame.charAt(i) == ',') {
+      irRight2Left[field] = frame.substring(start, i).toInt();
+      start = i + 1;
+      field++;
+    }
+  }
+  if (field == 4) {
+    irRight2Left[4] = frame.substring(start).toInt();
+  }
+}
+
+bool isBoundaryDetected() {
+  for (int i = 0; i < 5; i++) {
+    bool triggered = IR_ACTIVE_HIGH ? (irRight2Left[i] == HIGH) : (irRight2Left[i] == LOW);
+    if (triggered) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------
@@ -107,6 +181,17 @@ void curveTowardLeftWall() {
   analogWrite(LEFT_ENA, LEFT_HALF_SPEED);
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void turnLeftPivot() {
+  // Right wheel stopped, left wheel forward at full speed - a
+  // sharper correction than curveTowardLeftWall(), used when the
+  // IR array says the robot has reached the boundary tape.
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  analogWrite(LEFT_ENA, LEFT_FULL_SPEED);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
 }
