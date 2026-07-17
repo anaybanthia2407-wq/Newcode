@@ -1,21 +1,27 @@
 /*
   Arduino UNO - RUSH Robo Race Main Controller (Round 1: Qualifier)
   ---------------------------------------------------
-  The right ultrasonic sensor is still unused here. The Nano's
-  5-channel IR array (now angled down at the ground, close to the
-  surface, detecting the black boundary tape) is back in play as a
-  safety backstop on top of the normal wall-hugging:
+  Standalone Uno-only sketch - the Nano is not used here.
 
-    boundary tape detected by ANY IR channel -> override everything
-    and pivot sharply back toward the wall (the ultrasonic-based
-    hugging let the robot drift too close to the outer edge)
-    otherwise -> normal Round 1 wall-following:
-      left ultrasonic wall detected within range -> both wheels
-      forward at full speed
-      wall not detected (too far / lost it) -> keep the LEFT wheel
-      driving forward but at half speed (via its ENA PWM pin) while
-      the RIGHT wheel stays at full speed, curving the robot back
-      left until the wall is picked up again
+  FRONT ultrasonic (the "right ultrasonic sensor" hardware, Trig
+  D10/Echo D11, now mounted facing straight forward instead of
+  sideways) is the collision-recovery trigger - checked first,
+  overriding everything else:
+    distance < FRONT_WALL_CM -> back up, stop, then tank-turn
+    (left wheel forward, right wheel backward) until the front
+    sensor no longer sees the wall, then resume normal driving.
+
+  LEFT ultrasonic (fixed pointing sideways-left, Trig D8/Echo D9)
+  hugs whatever wall is beside the robot, with three graduated
+  responses instead of a single on/off curve:
+    distance > 60cm          -> wall essentially lost (e.g. past a
+                                 corner) - full-strength turn left
+                                 (curveTowardLeftWall, same as before)
+    distance < 19cm          -> too close - pivot right, away from
+                                 the wall, until back near 20cm
+    distance > 21cm (<=60cm) -> moderately far - gentle nudge left,
+                                 toward the wall, until back near 20cm
+    19-21cm                  -> on target - drive straight
 
   Wiring (Arduino Uno):
     L298N Motor Driver (direction pins):
@@ -32,14 +38,10 @@
       TRIG -> D8
       ECHO -> D9
 
-    Serial link to NANO (5-channel IR boundary array):
-      Uno TX (D1) -> Nano RX (D0)
-      Uno RX (D0) -> Nano TX (D1)
-      GND <-> GND (common ground, required)
-
-  NOTE: Because this link uses the hardware Serial pins (D0/D1),
-  disconnect the cross-wiring to the NANO (or unplug the Uno's
-  USB) while uploading this sketch.
+    Front Ultrasonic Sensor (mounted fixed, pointing straight
+    forward):
+      TRIG -> D10
+      ECHO -> D11
 */
 
 // ---------- L298N motor driver ----------
@@ -53,27 +55,27 @@ const uint8_t LEFT_ENA = 3; // left motor speed (PWM)
 const uint8_t LEFT_TRIG = 8;
 const uint8_t LEFT_ECHO = 9;
 
-// ---------- Tunable (cm) ----------
-const int LEFT_WALL_CM = 20; // left sensor reading at or below this = "wall detected"
+// ---------- Front ultrasonic sensor ----------
+const uint8_t FRONT_TRIG = 10;
+const uint8_t FRONT_ECHO = 11;
+
+// ---------- Tunables (cm) ----------
+const int LEFT_TARGET_MIN_CM = 19; // below this -> too close, pivot away
+const int LEFT_TARGET_MAX_CM = 21; // above this -> too far, nudge toward wall
+const int LEFT_LOST_CM = 60;       // above this -> wall essentially lost, full turn
+const int FRONT_WALL_CM = 20;      // front sensor reading below this -> back up and turn
 
 // ---------- Left motor speed (PWM, 0-255) ----------
 const uint8_t LEFT_FULL_SPEED = 255;
-const uint8_t LEFT_HALF_SPEED = 75; // used instead of fully stopping the left wheel while curving
+const uint8_t LEFT_HALF_SPEED = 75;   // strong correction, used when the wall is essentially lost (>60cm)
+const uint8_t LEFT_GENTLE_SPEED = 180; // milder correction, used for the 21-60cm fine nudge
 
-// ---------- IR boundary sensor polarity ----------
-const bool IR_ACTIVE_HIGH = true; // set false if your IR module outputs LOW when it senses the black tape
-
-// ---------- Boundary correction timing ----------
-const unsigned long BOUNDARY_TURN_MS = 300; // how long to pivot back toward the wall once tape is seen
+// ---------- Front-wall recovery timing ----------
+const unsigned long REVERSE_MS = 300; // how long to back up before turning
 
 const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
 
-// ---------- Data from the Nano ----------
-int irRight2Left[5] = {0, 0, 0, 0, 0}; // s1 (extreme right) .. s5 (extreme left)
-
 void setup() {
-  Serial.begin(9600); // link to Nano
-
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT);
@@ -82,70 +84,49 @@ void setup() {
 
   pinMode(LEFT_TRIG, OUTPUT);
   pinMode(LEFT_ECHO, INPUT);
+  pinMode(FRONT_TRIG, OUTPUT);
+  pinMode(FRONT_ECHO, INPUT);
 
   stopMotors();
   delay(START_DELAY_MS);
 }
 
 void loop() {
-  readNanoData();
-
-  if (isBoundaryDetected()) {
-    turnLeftPivot(); // sharp correction back toward the wall
-    delay(BOUNDARY_TURN_MS);
+  long frontDist = readDistanceCm(FRONT_TRIG, FRONT_ECHO);
+  if (frontDist > 0 && frontDist < FRONT_WALL_CM) {
+    avoidFrontWall();
     return;
   }
 
   long leftDist = readDistanceCm(LEFT_TRIG, LEFT_ECHO);
-  bool leftWallDetected = (leftDist > 0 && leftDist <= LEFT_WALL_CM);
 
-  if (leftWallDetected) {
-    bothForward();
-  } else {
+  if (leftDist == 0 || leftDist > LEFT_LOST_CM) {
     curveTowardLeftWall();
+  } else if (leftDist < LEFT_TARGET_MIN_CM) {
+    pivotAwayFromLeftWall();
+  } else if (leftDist > LEFT_TARGET_MAX_CM) {
+    gentleNudgeTowardLeftWall();
+  } else {
+    bothForward();
   }
 }
 
 // ---------------------------------------------------
-// Serial: parse "s1,s2,s3,s4,s5" from the Nano
-// (s1 = extreme right ... s5 = extreme left)
+// Back up, stop, then tank-turn left until the front sensor
+// no longer sees the wall, then hand back to the main loop.
 // ---------------------------------------------------
-void readNanoData() {
-  static String buffer = "";
+void avoidFrontWall() {
+  moveBackward();
+  delay(REVERSE_MS);
+  stopMotors();
 
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c == '\n') {
-      parseNanoFrame(buffer);
-      buffer = "";
-    } else if (c != '\r') {
-      buffer += c;
-    }
-  }
-}
+  tankTurnLeft();
+  long frontDist;
+  do {
+    frontDist = readDistanceCm(FRONT_TRIG, FRONT_ECHO);
+  } while (frontDist > 0 && frontDist < FRONT_WALL_CM);
 
-void parseNanoFrame(String frame) {
-  int start = 0;
-  int field = 0;
-
-  for (int i = 0; i < frame.length() && field < 4; i++) {
-    if (frame.charAt(i) == ',') {
-      irRight2Left[field] = frame.substring(start, i).toInt();
-      start = i + 1;
-      field++;
-    }
-  }
-  if (field == 4) {
-    irRight2Left[4] = frame.substring(start).toInt();
-  }
-}
-
-bool isBoundaryDetected() {
-  for (int i = 0; i < 5; i++) {
-    bool triggered = IR_ACTIVE_HIGH ? (irRight2Left[i] == HIGH) : (irRight2Left[i] == LOW);
-    if (triggered) return true;
-  }
-  return false;
+  stopMotors();
 }
 
 // ---------------------------------------------------
@@ -174,10 +155,27 @@ void bothForward() {
   digitalWrite(IN4, LOW);
 }
 
+void moveBackward() {
+  analogWrite(LEFT_ENA, LEFT_FULL_SPEED);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+}
+
+void tankTurnLeft() {
+  // Left wheel forward, right wheel backward - spins left in place.
+  analogWrite(LEFT_ENA, LEFT_FULL_SPEED);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
 void curveTowardLeftWall() {
-  // Left wheel (IN3/IN4) kept forward but slowed to half speed via
-  // ENA, right wheel (IN1/IN2) stays at full speed - the robot arcs
-  // left until the left ultrasonic finds the wall again.
+  // Left wheel (IN3/IN4) kept forward but slowed via ENA (strong
+  // correction), right wheel (IN1/IN2) stays at full speed - the
+  // robot arcs left until the left ultrasonic finds the wall again.
   analogWrite(LEFT_ENA, LEFT_HALF_SPEED);
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
@@ -185,10 +183,22 @@ void curveTowardLeftWall() {
   digitalWrite(IN4, LOW);
 }
 
-void turnLeftPivot() {
-  // Right wheel stopped, left wheel forward at full speed - a
-  // sharper correction than curveTowardLeftWall(), used when the
-  // IR array says the robot has reached the boundary tape.
+void gentleNudgeTowardLeftWall() {
+  // Same idea as curveTowardLeftWall() but a milder speed
+  // reduction on the left wheel, for the smaller 21-60cm fine
+  // correction rather than a full wall-recovery turn.
+  analogWrite(LEFT_ENA, LEFT_GENTLE_SPEED);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void pivotAwayFromLeftWall() {
+  // Right wheel stopped, left wheel forward at full speed - pivots
+  // right, away from the wall. The right motor has no PWM (ENB
+  // tied to 5V), so a full stop is the only way to reduce its
+  // contribution.
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
   analogWrite(LEFT_ENA, LEFT_FULL_SPEED);
