@@ -71,7 +71,8 @@ const uint8_t LEFT_HALF_SPEED = 75;   // strong correction, used when the wall i
 const uint8_t LEFT_GENTLE_SPEED = 180; // milder correction, used for the 21-60cm fine nudge
 
 // ---------- Front-wall recovery timing ----------
-const unsigned long REVERSE_MS = 300; // how long to back up before turning
+const unsigned long REVERSE_MS = 300;  // how long to back up before turning
+const unsigned long MAX_TURN_MS = 400; // cap on the recovery turn - time it with no cap first, then set this to about half that observed duration
 
 const unsigned long START_DELAY_MS = 3000;   // time to place the robot before it moves
 const unsigned long INITIAL_FORWARD_MS = 500; // 0.5s straight forward before sensor logic kicks in
@@ -118,8 +119,9 @@ void loop() {
 }
 
 // ---------------------------------------------------
-// Back up, stop, then tank-turn left until the front sensor
-// no longer sees the wall, then hand back to the main loop.
+// Back up, stop, then tank-turn left until the front sensor no
+// longer sees the wall (capped at MAX_TURN_MS so it can't spin
+// past where it needs to), then hand back to the main loop.
 // ---------------------------------------------------
 void avoidFrontWall() {
   moveBackward();
@@ -127,10 +129,11 @@ void avoidFrontWall() {
   stopMotors();
 
   tankTurnLeft();
+  unsigned long turnStart = millis();
   long frontDist;
   do {
     frontDist = readDistanceCm(FRONT_TRIG, FRONT_ECHO);
-  } while (frontDist > 0 && frontDist < FRONT_WALL_CM);
+  } while ((frontDist > 0 && frontDist < FRONT_WALL_CM) && (millis() - turnStart < MAX_TURN_MS));
 
   stopMotors();
 }
