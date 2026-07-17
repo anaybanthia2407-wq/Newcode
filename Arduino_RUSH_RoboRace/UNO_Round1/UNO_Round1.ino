@@ -73,7 +73,8 @@ const uint8_t LEFT_GENTLE_SPEED = 180; // milder correction, used for the 21-60c
 // ---------- Front-wall recovery timing ----------
 const unsigned long REVERSE_MS = 300; // how long to back up before turning
 
-const unsigned long START_DELAY_MS = 3000; // time to place the robot before it moves
+const unsigned long START_DELAY_MS = 3000;   // time to place the robot before it moves
+const unsigned long INITIAL_FORWARD_MS = 500; // 0.5s straight forward before sensor logic kicks in
 
 void setup() {
   pinMode(IN1, OUTPUT);
@@ -89,6 +90,11 @@ void setup() {
 
   stopMotors();
   delay(START_DELAY_MS);
+
+  // Drive straight for a fixed head start before any sensor-based
+  // logic (front recovery, left-wall correction) takes over.
+  bothForward();
+  delay(INITIAL_FORWARD_MS);
 }
 
 void loop() {
