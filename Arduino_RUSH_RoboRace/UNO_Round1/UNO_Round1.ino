@@ -7,8 +7,8 @@
   D10/Echo D11, now mounted facing straight forward instead of
   sideways) is the collision-recovery trigger - checked first,
   overriding everything else:
-    distance < FRONT_WALL_CM -> back up, stop, then tank-turn
-    (left wheel forward, right wheel backward) until the front
+    distance < FRONT_WALL_CM -> back up, stop, then tank-turn RIGHT
+    (right wheel forward, left wheel backward) until the front
     sensor no longer sees the wall, then resume normal driving.
 
   LEFT ultrasonic (fixed pointing sideways-left, Trig D8/Echo D9)
@@ -71,11 +71,10 @@ const uint8_t LEFT_HALF_SPEED = 75;   // strong correction, used when the wall i
 const uint8_t LEFT_GENTLE_SPEED = 180; // milder correction, used for the 21-60cm fine nudge
 
 // ---------- Front-wall recovery timing ----------
-const unsigned long REVERSE_MS = 300;  // how long to back up before turning
-const unsigned long MAX_TURN_MS = 400; // cap on the recovery turn - time it with no cap first, then set this to about half that observed duration
+const unsigned long REVERSE_MS = 300; // how long to back up before turning
 
 const unsigned long START_DELAY_MS = 3000;   // time to place the robot before it moves
-const unsigned long INITIAL_FORWARD_MS = 500; // 0.5s straight forward before sensor logic kicks in
+const unsigned long INITIAL_FORWARD_MS = 300; // 0.5s straight forward before sensor logic kicks in
 
 void setup() {
   pinMode(IN1, OUTPUT);
@@ -119,21 +118,19 @@ void loop() {
 }
 
 // ---------------------------------------------------
-// Back up, stop, then tank-turn left until the front sensor no
-// longer sees the wall (capped at MAX_TURN_MS so it can't spin
-// past where it needs to), then hand back to the main loop.
+// Back up, stop, then tank-turn right until the front sensor
+// no longer sees the wall, then hand back to the main loop.
 // ---------------------------------------------------
 void avoidFrontWall() {
   moveBackward();
   delay(REVERSE_MS);
   stopMotors();
 
-  tankTurnLeft();
-  unsigned long turnStart = millis();
+  tankTurnRight();
   long frontDist;
   do {
     frontDist = readDistanceCm(FRONT_TRIG, FRONT_ECHO);
-  } while ((frontDist > 0 && frontDist < FRONT_WALL_CM) && (millis() - turnStart < MAX_TURN_MS));
+  } while (frontDist > 0 && frontDist < FRONT_WALL_CM);
 
   stopMotors();
 }
@@ -172,13 +169,13 @@ void moveBackward() {
   digitalWrite(IN4, HIGH);
 }
 
-void tankTurnLeft() {
-  // Left wheel forward, right wheel backward - spins left in place.
+void tankTurnRight() {
+  // Right wheel forward, left wheel backward - spins right in place.
   analogWrite(LEFT_ENA, LEFT_FULL_SPEED);
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
 }
 
 void curveTowardLeftWall() {
