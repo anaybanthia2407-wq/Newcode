@@ -158,12 +158,13 @@ body { background:var(--bg); color:var(--text); font-family:var(--sans); height:
 .tab-pane.active { display:flex; }
 
 /* ── GRAPH ── */
-.graph-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:.7rem; flex:1; min-height:0; display:flex; flex-direction:column; }
+.graph-card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:.7rem; flex:1; min-height:220px; display:flex; flex-direction:column; }
 .graph-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:.5rem; flex-shrink:0; }
 .graph-title  { font-family:var(--mono); font-size:.62rem; color:var(--text); letter-spacing:.08em; }
 .graph-legend { display:flex; gap:.85rem; }
 .legend-item  { display:flex; align-items:center; gap:.35rem; font-size:.6rem; color:var(--muted); }
-canvas#attentionGraph { flex:1; min-height:0; }
+canvas#attentionGraph { flex:1; min-height:170px; display:block; }
+canvas#compareGraph   { flex:1; min-height:170px; display:block; }
 
 /* ── HEATMAP ── */
 .hm-grid { display:flex; flex-wrap:wrap; gap:3px; }
@@ -343,8 +344,8 @@ canvas#attentionGraph { flex:1; min-height:0; }
       </div>
     </div>
 
-    <!-- Gaze indicator -->
-    <div id="gazeSection" style="display:none">
+    <!-- Gaze indicator (always visible) -->
+    <div id="gazeSection">
       <div class="sec-label">Gaze Direction</div>
       <div class="gaze-wrap">
         <div class="gaze-eyes">
@@ -627,7 +628,7 @@ canvas#attentionGraph { flex:1; min-height:0; }
         </div>
         <div style="display:flex;gap:.4rem;margin-top:.5rem;">
           <button class="btn btn-ghost" onclick="loadWeekly()" style="flex:1;font-size:.62rem;padding:.28rem">Refresh</button>
-          <button class="btn btn-green" onclick="downloadWeeklyPDF()" style="flex:1;font-size:.62rem;padding:.28rem">📄 PDF</button>
+          <button class="btn btn-green" onclick="downloadWeeklyPDF(this)" style="flex:1;font-size:.62rem;padding:.28rem">📄 PDF</button>
         </div>
       </div>
 
@@ -697,7 +698,10 @@ function fmtDate(iso) { try{ const d=new Date(iso); return d.toLocaleDateString(
 // ── Graph drawing ──────────────────────────────────────────────────────────────
 function resizeCanvas(cv) {
   const r=cv.parentElement.getBoundingClientRect();
-  if(r.width>0) { cv.width=r.width; cv.height=r.height-40; }
+  if(r.width>0) {
+    cv.width  = r.width;
+    cv.height = Math.max(160, r.height - 40);
+  }
 }
 
 function drawGraph() {
@@ -753,12 +757,15 @@ function drawGraph() {
   ctx.fillStyle=scoreColor(scores[n-1]);
   ctx.beginPath(); ctx.arc(lx,ly,4,0,Math.PI*2); ctx.fill();
 
-  // X labels
+  // X labels (1 tick = 200ms in demo, ~66ms in live mode; approximate to seconds)
   ctx.fillStyle='#4A5E7A'; ctx.font='9px monospace'; ctx.textAlign='center';
-  const lCount=Math.min(6,n);
-  for(let i=0;i<lCount;i++){
-    const idx=Math.round(i*(n-1)/(lCount-1));
-    ctx.fillText((idx/15|0)+'s',x(idx),H-6);
+  const FPS_EST = liveMode ? 15 : 5;
+  const lCount = Math.min(6, n);
+  for(let i=0; i<lCount; i++){
+    const idx = Math.round(i*(n-1)/Math.max(lCount-1,1));
+    const secs = Math.round(idx / FPS_EST);
+    const label = secs >= 60 ? (secs/60|0)+'m' : secs+'s';
+    ctx.fillText(label, x(idx), H-6);
   }
 }
 
@@ -988,29 +995,58 @@ function addEvent(type, msg) {
   if(log.children.length>60) log.removeChild(log.lastChild);
 }
 
-// ── Simulation engine ─────────────────────────────────────────────────────────
-let simScore=75,simPhase=0,simPhaseT=0,simEAR=.28,simMAR=.05,simYaw=3,simPitch=5;
-let simIntervalId=null;
+// ── Simulation engine ──────────────────────────────────────────────────────────
+// Runs at 200ms (5fps) so graph, heatmap and indicators update smoothly in demo
+let simScore=75, simPhase=0, simPhaseT=0;
+let simEAR=.28, simMAR=.05, simYaw=3, simPitch=5;
+let simGazeX=0, simGazeY=0, simGazeDir='CENTER', simPosture=1, simTrend=0;
+let simIntervalId=null, simTickCount=0;
+
+const SIM_GAZE_DIRS = ['CENTER','CENTER','CENTER','LEFT','RIGHT','CENTER','DOWN','CENTER'];
 
 function simulateTick() {
-  if(paused||liveMode) return;
+  if(paused || liveMode) return;
   simPhaseT++;
-  if(simPhaseT>30&&Math.random()<.03){simPhase=(simPhase+1)%4;simPhaseT=0;}
-  const targets=[82,58,30,70];
-  const target=targets[simPhase]+(Math.random()-.5)*10;
-  simScore=Math.max(0,Math.min(100,simScore+(target-simScore)*.04+(Math.random()-.5)*3));
-  simEAR=Math.max(.15,Math.min(.4,simEAR+(Math.random()-.5)*.02));
-  simMAR=Math.max(.02,Math.min(.3,simMAR+(Math.random()-.5)*.03));
-  simYaw=Math.max(-30,Math.min(30,simYaw+(Math.random()-.5)*4));
-  simPitch=Math.max(-20,Math.min(20,simPitch+(Math.random()-.5)*3));
+  simTickCount++;
 
+  // Phase lasts ~8s (40 ticks at 200ms) then has a chance to transition
+  if(simPhaseT > 40 && Math.random() < 0.04) { simPhase=(simPhase+1)%4; simPhaseT=0; }
+
+  // Score: converge toward phase target with noise
+  const targets=[85, 60, 32, 72];
+  const target = targets[simPhase] + (Math.random()-.5)*8;
+  simScore = Math.max(0, Math.min(100, simScore + (target-simScore)*0.06 + (Math.random()-.5)*2.5));
+
+  // Biometrics
+  simEAR   = Math.max(.15, Math.min(.42, simEAR   + (Math.random()-.5)*.015));
+  simMAR   = Math.max(.02, Math.min(.28, simMAR   + (Math.random()-.5)*.025));
+  simYaw   = Math.max(-28, Math.min(28,  simYaw   + (Math.random()-.5)*3));
+  simPitch = Math.max(-18, Math.min(18,  simPitch + (Math.random()-.5)*2));
+
+  // Gaze — mostly CENTER, occasionally looks away
+  if(simTickCount % 30 === 0) simGazeDir = SIM_GAZE_DIRS[Math.floor(Math.random()*SIM_GAZE_DIRS.length)];
+  if(simGazeDir==='LEFT')   { simGazeX=-0.42; simGazeY=0; }
+  else if(simGazeDir==='RIGHT')  { simGazeX=0.42; simGazeY=0; }
+  else if(simGazeDir==='DOWN')   { simGazeX=0; simGazeY=0.35; }
+  else { simGazeX+=(0-simGazeX)*.15+(Math.random()-.5)*.05; simGazeY+=(0-simGazeY)*.15+(Math.random()-.5)*.04; }
+
+  // Posture: bad when score is very low
+  simPosture = simScore < 38 ? 0 : 1;
+
+  // Trend: running average of last 20 score changes
+  simTrend = (targets[simPhase] > simScore) ? 3.5 : targets[simPhase] < simScore ? -3.5 : 0;
+
+  // Update UI
   pushScore(simScore);
-  updateBioUI(simEAR,simMAR,simYaw,simPitch);
   updateRing(simScore);
+  updateBioUI(simEAR, simMAR, simYaw, simPitch);
+  updateGaze(simGazeDir, simGazeX, simGazeY);
+  updatePostureTrend(simPosture, simTrend);
   updateStats();
   checkAlert(simScore);
   drawGraph();
   if(document.getElementById('ctab-heatmap').classList.contains('active')) drawHeatmap();
+  updateGoalProgress();
 }
 
 // ── Python AI mode ─────────────────────────────────────────────────────────────
@@ -1028,7 +1064,6 @@ function connectPython() {
     const name=document.getElementById('studentName').value.trim()||'Student';
     if(simIntervalId){clearInterval(simIntervalId);simIntervalId=null;}
     document.getElementById('camSection').style.display='block';
-    document.getElementById('gazeSection').style.display='block';
     document.getElementById('camBadge').textContent='STARTING CAMERA…';
     document.getElementById('camBadge').style.color='var(--cyan)';
     btn.textContent='Python AI Active';
@@ -1098,20 +1133,19 @@ function connectPython() {
   socket.on('disconnect',()=>{
     liveMode=false;
     document.getElementById('camSection').style.display='none';
-    document.getElementById('gazeSection').style.display='none';
     document.getElementById('drowsyBanner').classList.remove('active');
     document.getElementById('studentBadge').style.display='none';
     btn.disabled=false; btn.textContent='Python AI';
     document.getElementById('modeBadge').textContent='DEMO MODE';
     document.getElementById('modeBadge').style.color='var(--cyan)';
     addEvent('info','Disconnected — session saved to database');
-    if(!simIntervalId) simIntervalId=setInterval(simulateTick,1000);
+    if(!simIntervalId) simIntervalId=setInterval(simulateTick,200);
     loadHistory();
   });
   socket.on('camera_error',d=>{
     alert('Camera Error: '+d.msg);
     btn.disabled=false; btn.textContent='Python AI'; liveMode=false;
-    if(!simIntervalId) simIntervalId=setInterval(simulateTick,1000);
+    if(!simIntervalId) simIntervalId=setInterval(simulateTick,200);
   });
   socket.on('connect_error',()=>{
     btn.disabled=false; btn.textContent='Python AI'; socket=null;
@@ -1223,11 +1257,19 @@ function showRTab(name){
 async function loadHistory(){
   try{
     const r=await fetch('/api/sessions');
+    if(!r.ok) throw new Error('Server error');
     const sessions=await r.json();
     renderSessionList(sessions);
     loadWeekly();
     populateCompareSelects(sessions);
-  } catch(e){}
+  } catch(e){
+    const list=document.getElementById('sessionList');
+    list.innerHTML='<div style="font-family:var(--mono);font-size:.65rem;color:var(--muted);padding:.6rem;line-height:1.7">'
+      +'No sessions yet.<br>'
+      +'<span style="color:var(--cyan)">Start Python AI</span> to record sessions.</div>';
+    document.getElementById('wAvg').textContent='—';
+    document.getElementById('wSess').textContent='0';
+  }
 }
 
 function renderSessionList(sessions){
@@ -1284,51 +1326,66 @@ function exportCSV(){
 async function loadWeekly(){
   try{
     const r=await fetch('/api/weekly');
+    if(!r.ok) throw new Error();
     const d=await r.json();
     document.getElementById('wAvg').textContent=d.weekly_avg?d.weekly_avg+'%':'—';
     document.getElementById('wAvg').style.color=d.weekly_avg?scoreColor(d.weekly_avg):'var(--muted)';
     document.getElementById('wSess').textContent=d.total_sessions||'0';
-  } catch(e){}
+  } catch(e){
+    document.getElementById('wAvg').textContent='—';
+    document.getElementById('wSess').textContent='—';
+  }
 }
 
-async function downloadWeeklyPDF(){
+async function downloadWeeklyPDF(btnEl){
+  const btn=btnEl||document.querySelector('[onclick*="downloadWeeklyPDF"]');
   try{
-    const btn=event.target; btn.disabled=true; btn.textContent='Generating…';
+    if(btn){btn.disabled=true; btn.textContent='Generating…';}
     const r=await fetch('/api/weekly/pdf');
     const d=await r.json();
-    btn.disabled=false; btn.textContent='📄 PDF';
+    if(btn){btn.disabled=false; btn.textContent='📄 PDF';}
     if(d.ok) addEvent('info','✓ Weekly report saved: '+d.path);
-    showRTab('history');
-  } catch(e){ event.target.disabled=false; event.target.textContent='📄 PDF'; }
+    else if(d.error) addEvent('info','Report error: '+d.error);
+  } catch(e){
+    if(btn){btn.disabled=false; btn.textContent='📄 PDF';}
+    addEvent('info','Cannot generate PDF — start Python AI first.');
+  }
 }
 
 // ── Screenshot gallery ─────────────────────────────────────────────────────────
 async function loadGallery(){
+  const grid=document.getElementById('galleryGrid');
+  const note=document.getElementById('gallerySessionNote');
   if(!selectedSessionId){
-    document.getElementById('gallerySessionNote').textContent='Select a session from History first.';
+    note.textContent='Select a session from History to view screenshots.';
+    grid.innerHTML='<div class="gallery-empty" style="grid-column:span 2">No session selected</div>';
     return;
   }
   try{
     const r=await fetch(`/api/sessions/${selectedSessionId}/screenshots`);
+    if(!r.ok) throw new Error();
     const shots=await r.json();
-    const grid=document.getElementById('galleryGrid');
     grid.innerHTML='';
-    document.getElementById('gallerySessionNote').textContent=`Session #${selectedSessionId} — ${shots.length} screenshot(s)`;
+    note.textContent=`Session #${selectedSessionId} — ${shots.length} screenshot(s)`;
     if(!shots.length){
-      grid.innerHTML='<div class="gallery-empty" style="grid-column:span 2">No screenshots for this session.</div>';
+      grid.innerHTML='<div class="gallery-empty" style="grid-column:span 2">No screenshots for this session.<br><span style="font-size:.6rem;color:var(--muted)">Screenshots are taken when score drops below 50%</span></div>';
       return;
     }
     shots.forEach(s=>{
       const name=s.filepath.split('/').pop().split('\\').pop();
       const div=document.createElement('div');
       div.className='gallery-thumb';
-      div.innerHTML=`<img src="/screenshots/${name}" alt="Score ${s.score}%" loading="lazy" onerror="this.src=''">
-        <div class="gallery-score">Score: ${s.score}% · ${fmtDate(s.taken_at)}</div>`;
+      div.innerHTML=`<img src="/screenshots/${name}" alt="Score ${s.score}%" loading="lazy"
+        onerror="this.parentElement.style.display='none'">
+        <div class="gallery-score">Score: ${(+s.score).toFixed(0)}% · ${fmtDate(s.taken_at)}</div>`;
       div.onclick=()=>window.open('/screenshots/'+name,'_blank');
       grid.appendChild(div);
     });
     showRTab('gallery');
-  } catch(e){}
+  } catch(e){
+    note.textContent='Cannot load screenshots — Python server not running.';
+    grid.innerHTML='<div class="gallery-empty" style="grid-column:span 2">Start Python AI to capture screenshots</div>';
+  }
 }
 
 // ── Populate selectors ─────────────────────────────────────────────────────────
@@ -1348,22 +1405,43 @@ function populateCompareSelects(sessions){
 }
 
 function loadSessionsIntoSelects(){
-  fetch('/api/sessions').then(r=>r.json()).then(populateCompareSelects).catch(()=>{});
+  fetch('/api/sessions')
+    .then(r=>{ if(!r.ok) throw new Error(); return r.json(); })
+    .then(populateCompareSelects)
+    .catch(()=>{
+      ['cmpA','cmpB'].forEach(id=>{
+        const sel=document.getElementById(id);
+        sel.innerHTML='<option value="">No sessions — start Python AI</option>';
+      });
+    });
 }
 
 function loadHypothesisSessions(){
-  fetch('/api/sessions').then(r=>r.json()).then(sessions=>{
-    ['hypSelA','hypSelB'].forEach(id=>{
-      const sel=document.getElementById(id);
-      sel.innerHTML='';
-      sessions.slice(0,20).forEach(s=>{
-        const o=document.createElement('option');
-        o.value=s.avg_score||0;
-        o.textContent=`#${s.id} ${s.student_name||'Student'} (${s.avg_score?s.avg_score.toFixed(0)+'%':'?'})`;
-        sel.appendChild(o);
+  fetch('/api/sessions')
+    .then(r=>{ if(!r.ok) throw new Error(); return r.json(); })
+    .then(sessions=>{
+      ['hypSelA','hypSelB'].forEach(id=>{
+        const sel=document.getElementById(id);
+        sel.innerHTML='';
+        if(!sessions.length){
+          const o=document.createElement('option');
+          o.textContent='No sessions yet — run some sessions first'; o.disabled=true;
+          sel.appendChild(o); return;
+        }
+        sessions.slice(0,20).forEach(s=>{
+          const o=document.createElement('option');
+          o.value=s.avg_score||0;
+          o.textContent=`#${s.id} ${s.student_name||'Student'} (${s.avg_score?s.avg_score.toFixed(0)+'%':'?'})`;
+          sel.appendChild(o);
+        });
+      });
+    })
+    .catch(()=>{
+      ['hypSelA','hypSelB'].forEach(id=>{
+        const sel=document.getElementById(id);
+        sel.innerHTML='<option disabled>Start Python AI to load sessions</option>';
       });
     });
-  }).catch(()=>{});
 }
 
 // ── Hypothesis testing ─────────────────────────────────────────────────────────
@@ -1449,10 +1527,15 @@ window.addEventListener('resize',()=>{ drawGraph(); drawCompareGraph(); });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.getElementById('loading-overlay').classList.add('hidden');
-simIntervalId=setInterval(simulateTick,1000);
-simulateTick();
-loadHistory();
-startSessionClock();
+// Initial draws with a slight delay so flex layout has time to calculate heights
+setTimeout(()=>{
+  drawGraph();
+  drawCompareGraph();
+  simulateTick();
+  simIntervalId = setInterval(simulateTick, 200);   // 5 fps simulation
+  loadHistory();
+  startSessionClock();
+}, 80);
 </script>
 </body>
 </html>
