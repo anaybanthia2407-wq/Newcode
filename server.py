@@ -185,6 +185,8 @@ def _stream_loop(student_name: str):
                 mar       = detector.last_mar,
                 yaw       = detector.last_yaw,
                 pitch     = detector.last_pitch,
+                gaze_dir  = detector.gaze_direction,
+                posture   = detector.last_posture,
             )
 
             ok_enc, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
@@ -221,10 +223,12 @@ def _stream_loop(student_name: str):
     finally:
         stats = detector.session_stats()
         session_db.end_session(
-            avg_score    = stats["average_attention"],
-            blinks       = detector.blink_count,
-            yawns        = detector.yawn_count,
-            distractions = detector.distraction_events,
+            avg_score      = stats["average_attention"],
+            blinks         = detector.blink_count,
+            yawns          = detector.yawn_count,
+            distractions   = detector.distraction_events,
+            drowsy         = detector.drowsy_events,
+            posture_events = detector.posture_events,
         )
         cap.release()
         detector.release()
@@ -265,48 +269,33 @@ def api_session_csv(sid):
     resp.headers["Content-Disposition"] = f"attachment; filename=session_{sid}_data.csv"
     return resp
 
+def _get_weekly_sessions():
+    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    rows = get_all_sessions()   # already uses WAL-mode connection
+    return [s for s in rows if s.get("start_time", "") >= week_ago]
+
 @app.route("/api/weekly")
 def api_weekly():
-    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-    init_db()
-    import sqlite3
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT * FROM sessions WHERE start_time >= ? ORDER BY start_time ASC",
-        (week_ago,)
-    ).fetchall()
-    conn.close()
-    sessions = [dict(r) for r in rows]
-    valid    = [s for s in sessions if s.get("avg_score") is not None]
-    weekly_avg     = round(sum(s["avg_score"] for s in valid) / len(valid), 1) if valid else 0
-    total_blinks   = sum(s.get("total_blinks",       0) or 0 for s in sessions)
-    total_yawns    = sum(s.get("total_yawns",        0) or 0 for s in sessions)
-    total_dist     = sum(s.get("total_distractions", 0) or 0 for s in sessions)
+    sessions = _get_weekly_sessions()
+    valid        = [s for s in sessions if s.get("avg_score") is not None]
+    weekly_avg   = round(sum(s["avg_score"] for s in valid) / len(valid), 1) if valid else 0
     return jsonify({
-        "sessions":          sessions,
-        "weekly_avg":        weekly_avg,
-        "total_sessions":    len(sessions),
-        "total_blinks":      total_blinks,
-        "total_yawns":       total_yawns,
-        "total_distractions": total_dist,
+        "sessions":           sessions,
+        "weekly_avg":         weekly_avg,
+        "total_sessions":     len(sessions),
+        "total_blinks":       sum(s.get("total_blinks",       0) or 0 for s in sessions),
+        "total_yawns":        sum(s.get("total_yawns",        0) or 0 for s in sessions),
+        "total_distractions": sum(s.get("total_distractions", 0) or 0 for s in sessions),
     })
 
 @app.route("/api/weekly/pdf")
 def api_weekly_pdf():
-    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-    init_db()
-    import sqlite3
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT * FROM sessions WHERE start_time >= ? ORDER BY start_time ASC",
-        (week_ago,)
-    ).fetchall()
-    conn.close()
-    sessions = [dict(r) for r in rows]
-    path = generate_weekly_report(sessions)
-    return jsonify({"path": path, "ok": True})
+    sessions = _get_weekly_sessions()
+    try:
+        path = generate_weekly_report(sessions)
+        return jsonify({"path": path, "ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 # ── Socket.IO events ───────────────────────────────────────────────────────────
@@ -356,9 +345,10 @@ def on_generate_report(data=None):
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    init_db()           # create/migrate DB before accepting any requests
     _load_face_model()
     print("\n  AttentionAI — Python Backend Server")
     print("  MediaPipe 468-point face mesh + gaze + posture + drowsiness")
-    print(f"  Screenshots: {SCREENSHOT_DIR}/   Database: attention_data.db")
+    print(f"  Screenshots: {SCREENSHOT_DIR}/   Database: {DB_PATH}")
     print("  Open your browser at: http://localhost:5000\n")
     socketio.run(app, host="0.0.0.0", port=5000, debug=False)
