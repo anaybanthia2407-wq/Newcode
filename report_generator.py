@@ -252,3 +252,164 @@ def _text_report(stats, avg, dur, blink, yawn, dist, stamp):
         "Note: Install fpdf2 for a full PDF report.",
     ]
     return "\n".join(lines)
+
+
+# ── Weekly summary report ──────────────────────────────────────────────────────
+def generate_weekly_report(sessions: list) -> str:
+    """
+    Generate a PDF summarising all sessions from the last 7 days.
+    sessions: list of dicts from get_all_sessions().
+    Returns path to saved PDF.
+    """
+    os.makedirs(REPORT_DIR, exist_ok=True)
+    stamp      = datetime.now().strftime("%Y%m%d_%H%M%S")
+    pdf_path   = os.path.join(REPORT_DIR, f"weekly_report_{stamp}.pdf")
+    graph_path = os.path.join(REPORT_DIR, f"_tmp_weekly_{stamp}.png")
+
+    valid = [s for s in sessions if s.get("avg_score") is not None]
+    dates = []
+    avgs  = []
+    for s in valid:
+        try:
+            dt = datetime.fromisoformat(s["start_time"])
+            dates.append(dt.strftime("%a %d"))
+            avgs.append(s["avg_score"])
+        except Exception:
+            pass
+
+    # Weekly trend chart
+    fig, ax = plt.subplots(figsize=(9, 3), facecolor="#1a1a2e")
+    ax.set_facecolor("#16213e")
+    if avgs:
+        colours = ["#2ecc71" if a >= 70 else "#f39c12" if a >= 40 else "#e74c3c"
+                   for a in avgs]
+        ax.bar(range(len(avgs)), avgs, color=colours, width=0.6, zorder=3)
+        ax.axhline(70, color="#2ecc71", linestyle="--", lw=0.8, alpha=0.5)
+        ax.axhline(40, color="#e74c3c", linestyle="--", lw=0.8, alpha=0.5)
+        ax.set_xticks(range(len(avgs)))
+        ax.set_xticklabels(dates, color="white", fontsize=7)
+    ax.set_ylim(0, 105)
+    ax.set_ylabel("Avg Attention %", color="white", fontsize=8)
+    ax.set_title("Weekly Attention Summary", color="white", fontsize=10, pad=6)
+    ax.tick_params(colors="white", labelsize=7)
+    for sp in ax.spines.values():
+        sp.set_edgecolor("#444")
+    plt.tight_layout()
+    fig.savefig(graph_path, dpi=130, facecolor=fig.get_facecolor())
+    plt.close(fig)
+
+    weekly_avg   = sum(avgs) / len(avgs) if avgs else 0.0
+    total_blinks = sum(s.get("total_blinks",       0) or 0 for s in sessions)
+    total_yawns  = sum(s.get("total_yawns",        0) or 0 for s in sessions)
+    total_dist   = sum(s.get("total_distractions", 0) or 0 for s in sessions)
+
+    if not _FPDF_AVAILABLE:
+        txt_path = pdf_path.replace(".pdf", ".txt")
+        with open(txt_path, "w") as f:
+            f.write(f"=== Weekly Attention Report ===\n")
+            f.write(f"Period: last 7 days  |  Sessions: {len(sessions)}\n\n")
+            f.write(f"Weekly Average Attention : {weekly_avg:.1f}%\n")
+            f.write(f"Grade                    : {_grade(weekly_avg)}\n")
+            f.write(f"Total Blinks             : {total_blinks}\n")
+            f.write(f"Total Yawns              : {total_yawns}\n")
+            f.write(f"Total Distractions       : {total_dist}\n")
+        if os.path.exists(graph_path):
+            os.remove(graph_path)
+        return txt_path
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # Header
+    pdf.set_fill_color(22, 33, 62)
+    pdf.rect(0, 0, 210, 40, "F")
+    pdf.set_text_color(46, 204, 113)
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_xy(10, 8)
+    pdf.cell(0, 10, "Weekly Attention Summary", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(180, 180, 200)
+    pdf.set_x(10)
+    pdf.cell(0, 6,
+             f"Generated: {datetime.now().strftime('%d %B %Y')}  |  "
+             f"Sessions this week: {len(sessions)}", ln=True)
+    pdf.ln(8)
+
+    # Summary row
+    pdf.set_fill_color(26, 26, 46)
+    pdf.set_draw_color(46, 204, 113)
+    pdf.set_line_width(0.5)
+    pdf.rect(10, pdf.get_y(), 190, 40, "FD")
+    y0 = pdf.get_y() + 4
+
+    def _cell(x, y, label, val, col):
+        pdf.set_xy(x, y)
+        pdf.set_text_color(*col)
+        pdf.set_font("Helvetica", "B", 20)
+        pdf.cell(45, 8, str(val))
+        pdf.set_xy(x, y + 10)
+        pdf.set_text_color(150, 150, 170)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.cell(45, 5, label)
+
+    avg_col = (46,204,113) if weekly_avg >= 70 else (243,156,18) if weekly_avg >= 40 else (231,76,60)
+    _cell(15,  y0, "WEEKLY AVG",    f"{weekly_avg:.1f}%", avg_col)
+    _cell(65,  y0, "SESSIONS",      str(len(sessions)),    (100,180,255))
+    _cell(115, y0, "TOTAL BLINKS",  str(total_blinks),     (160,100,255))
+    _cell(160, y0, "DISTRACTIONS",  str(total_dist),       (231,76,60))
+
+    pdf.ln(50)
+
+    # Chart
+    pdf.set_text_color(200,200,220)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_x(10)
+    pdf.cell(0, 8, "Daily Attention Scores", ln=True)
+    if os.path.exists(graph_path):
+        pdf.image(graph_path, x=10, w=190)
+    pdf.ln(4)
+
+    # Per-session table
+    if sessions:
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(200,200,220)
+        pdf.cell(0, 8, "Session Log", ln=True)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_fill_color(30, 40, 70)
+        pdf.set_text_color(150, 200, 255)
+        for header, w in [("Date/Time", 60), ("Avg %", 25), ("Grade", 30),
+                           ("Blinks", 22), ("Yawns", 20), ("Distractions", 33)]:
+            pdf.cell(w, 6, header, fill=True)
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 8)
+        for i, s in enumerate(sessions):
+            try:
+                dt = datetime.fromisoformat(s["start_time"]).strftime("%d %b %Y %H:%M")
+            except Exception:
+                dt = s.get("start_time", "—")
+            avg_s = s.get("avg_score") or 0
+            col = (46,204,113) if avg_s >= 70 else (243,156,18) if avg_s >= 40 else (231,76,60)
+            fill = i % 2 == 0
+            pdf.set_fill_color(20, 28, 50) if fill else pdf.set_fill_color(16, 22, 40)
+            pdf.set_text_color(200, 200, 220)
+            pdf.cell(60, 5, dt, fill=True)
+            pdf.set_text_color(*col)
+            pdf.cell(25, 5, f"{avg_s:.1f}%", fill=True)
+            pdf.set_text_color(180, 180, 200)
+            pdf.cell(30, 5, _grade(avg_s), fill=True)
+            pdf.cell(22, 5, str(s.get("total_blinks",       0) or 0), fill=True)
+            pdf.cell(20, 5, str(s.get("total_yawns",        0) or 0), fill=True)
+            pdf.cell(33, 5, str(s.get("total_distractions", 0) or 0), fill=True)
+            pdf.ln()
+
+    # Footer
+    pdf.set_y(-18)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(100, 100, 120)
+    pdf.cell(0, 6, "AI Student Attention Detection System  |  Weekly Report", align="C")
+
+    pdf.output(pdf_path)
+    if os.path.exists(graph_path):
+        os.remove(graph_path)
+    return pdf_path
