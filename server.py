@@ -42,6 +42,7 @@ os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 _lock         = threading.Lock()
 _running      = False
+_paused       = False
 
 # ── Face recognition (optional, uses MediaPipe-based LBPH model) ───────────────
 _recogniser = None
@@ -169,8 +170,9 @@ def _stream_loop(student_name: str):
                 if name:
                     recognised = name
 
-            # Auto screenshot on low attention
-            _maybe_screenshot(frame, score, session_db)
+            # Auto screenshot on low attention (skipped while paused)
+            if not _paused:
+                _maybe_screenshot(frame, score, session_db)
 
             # Log movement to database
             session_db.log_movement(
@@ -254,6 +256,16 @@ def on_stop():
     with _lock:
         _running = False
     emit("status", {"msg": "Camera stopped — session saved."})
+
+@socketio.on("pause")
+def on_pause():
+    global _paused
+    _paused = True
+
+@socketio.on("resume")
+def on_resume():
+    global _paused
+    _paused = False
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

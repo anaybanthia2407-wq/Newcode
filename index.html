@@ -990,6 +990,7 @@ function togglePause() {
   paused=!paused;
   document.getElementById('btnPause').textContent=paused?'Resume':'Pause';
   document.getElementById('btnPause').className=paused?'btn btn-primary':'btn btn-danger';
+  if (socket && socket.connected) socket.emit(paused ? 'pause' : 'resume');
 }
 
 function resetSession() {
