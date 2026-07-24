@@ -13,10 +13,14 @@ try:
 except ImportError:
     _FPDF_AVAILABLE = False
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    _MPL_AVAILABLE = True
+except ImportError:
+    _MPL_AVAILABLE = False
 
 
 REPORT_DIR = "reports"
@@ -85,7 +89,8 @@ def generate_report(stats: dict) -> str:
         ts = ts[::step]
         sc = sc[::step]
 
-    _save_graph(ts, sc, graph_path)
+    if _MPL_AVAILABLE and sc:
+        _save_graph(ts, sc, graph_path)
 
     if not _FPDF_AVAILABLE:
         # Fallback: plain text report
@@ -166,7 +171,7 @@ def generate_report(stats: dict) -> str:
     for obs in observations:
         pdf.set_text_color(180, 180, 200)
         pdf.cell(5)
-        pdf.multi_cell(180, 6, f"•  {obs}")
+        pdf.multi_cell(180, 6, f">>  {obs}")
 
     # --- Recommendations ---
     pdf.ln(3)
@@ -178,7 +183,7 @@ def generate_report(stats: dict) -> str:
     for rec in recs:
         pdf.set_text_color(100, 200, 150)
         pdf.cell(5)
-        pdf.multi_cell(180, 6, f"✓  {rec}")
+        pdf.multi_cell(180, 6, f"[+]  {rec}")
 
     # --- Footer ---
     pdf.set_y(-18)
@@ -278,25 +283,26 @@ def generate_weekly_report(sessions: list) -> str:
             pass
 
     # Weekly trend chart
-    fig, ax = plt.subplots(figsize=(9, 3), facecolor="#1a1a2e")
-    ax.set_facecolor("#16213e")
-    if avgs:
-        colours = ["#2ecc71" if a >= 70 else "#f39c12" if a >= 40 else "#e74c3c"
-                   for a in avgs]
-        ax.bar(range(len(avgs)), avgs, color=colours, width=0.6, zorder=3)
-        ax.axhline(70, color="#2ecc71", linestyle="--", lw=0.8, alpha=0.5)
-        ax.axhline(40, color="#e74c3c", linestyle="--", lw=0.8, alpha=0.5)
-        ax.set_xticks(range(len(avgs)))
-        ax.set_xticklabels(dates, color="white", fontsize=7)
-    ax.set_ylim(0, 105)
-    ax.set_ylabel("Avg Attention %", color="white", fontsize=8)
-    ax.set_title("Weekly Attention Summary", color="white", fontsize=10, pad=6)
-    ax.tick_params(colors="white", labelsize=7)
-    for sp in ax.spines.values():
-        sp.set_edgecolor("#444")
-    plt.tight_layout()
-    fig.savefig(graph_path, dpi=130, facecolor=fig.get_facecolor())
-    plt.close(fig)
+    if _MPL_AVAILABLE:
+        fig, ax = plt.subplots(figsize=(9, 3), facecolor="#1a1a2e")
+        ax.set_facecolor("#16213e")
+        if avgs:
+            colours = ["#2ecc71" if a >= 70 else "#f39c12" if a >= 40 else "#e74c3c"
+                       for a in avgs]
+            ax.bar(range(len(avgs)), avgs, color=colours, width=0.6, zorder=3)
+            ax.axhline(70, color="#2ecc71", linestyle="--", lw=0.8, alpha=0.5)
+            ax.axhline(40, color="#e74c3c", linestyle="--", lw=0.8, alpha=0.5)
+            ax.set_xticks(range(len(avgs)))
+            ax.set_xticklabels(dates, color="white", fontsize=7)
+        ax.set_ylim(0, 105)
+        ax.set_ylabel("Avg Attention %", color="white", fontsize=8)
+        ax.set_title("Weekly Attention Summary", color="white", fontsize=10, pad=6)
+        ax.tick_params(colors="white", labelsize=7)
+        for sp in ax.spines.values():
+            sp.set_edgecolor("#444")
+        plt.tight_layout()
+        fig.savefig(graph_path, dpi=130, facecolor=fig.get_facecolor())
+        plt.close(fig)
 
     weekly_avg   = sum(avgs) / len(avgs) if avgs else 0.0
     total_blinks = sum(s.get("total_blinks",       0) or 0 for s in sessions)
