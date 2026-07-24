@@ -1134,8 +1134,8 @@ function connectPython() {
     liveMode=false;
     document.getElementById('camSection').style.display='none';
     document.getElementById('drowsyBanner').classList.remove('active');
-    document.getElementById('studentBadge').style.display='none';
     btn.disabled=false; btn.textContent='Python AI';
+    _updateNameBadge();
     document.getElementById('modeBadge').textContent='DEMO MODE';
     document.getElementById('modeBadge').style.color='var(--cyan)';
     addEvent('info','Disconnected — session saved to database');
@@ -1524,6 +1524,20 @@ function startSessionClock(){
 
 // ── Resize handler ─────────────────────────────────────────────────────────────
 window.addEventListener('resize',()=>{ drawGraph(); drawCompareGraph(); });
+
+// ── Student name badge (always visible when name is typed) ─────────────────────
+function _updateNameBadge(){
+  const name = document.getElementById('studentName').value.trim();
+  const wrap = document.getElementById('studentBadge');
+  const txt  = document.getElementById('studentBadgeText');
+  if(name && !liveMode){
+    txt.textContent = 'Student: ' + name;
+    wrap.style.display = '';
+  } else if(!name && !liveMode){
+    wrap.style.display = 'none';
+  }
+}
+document.getElementById('studentName').addEventListener('input', _updateNameBadge);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.getElementById('loading-overlay').classList.add('hidden');

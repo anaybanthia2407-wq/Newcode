@@ -315,7 +315,11 @@ def _show_header():
     print(f"\n{BOLD}{'═'*48}{RST}")
     print(f"{BOLD}   Face Enrollment — AttentionAI System{RST}")
     print(f"{'═'*48}")
-    print(f"  Enrolled students : {CYN}{len(students)}{RST}")
+    if students:
+        names = ", ".join(row[1] for row in students)
+        print(f"  Enrolled students : {CYN}{len(students)}{RST}  → {GRN}{names}{RST}")
+    else:
+        print(f"  Enrolled students : {CYN}0{RST}")
     print(f"  Trained model     : {GRN+'Ready  ('+MODEL_FILE+')' if model_ok else RED+'Not trained yet'}{RST}")
     print(f"{'─'*48}\n")
 
@@ -328,7 +332,7 @@ def _show_students():
     print(f"\n  {'ID':<5} {'Name':<25} {'Enrolled'}")
     print("  " + "─" * 52)
     for sid, name, dt, blob_sz in rows:
-        approx = (blob_sz // 40000) if blob_sz else 0
+        approx = (blob_sz // 10200) if blob_sz else 0
         print(f"  {CYN}{sid:<5}{RST} {name:<25} {DIM}{dt or '—'}{RST}  (~{approx} samples)")
     print()
 
