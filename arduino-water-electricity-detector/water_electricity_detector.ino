@@ -3,16 +3,17 @@
   -----------------------------------------------
   Two bare jumper wires act as sensing probes. When they are bridged
   by water (or a live/leaking conductive path in water), the analog
-  reading on the sense pin rises above a threshold. On detection, an
+  reading on the sense pin drops below a threshold. On detection, an
   SSD1306 OLED shows a warning, an LED blinks, and a buzzer sounds.
 
   Wiring:
     Water sensor probes (bare jumper wire ends, tips ~1cm apart,
-    both dipped in/near the water being monitored):
-      Probe A (drive)  -> Arduino 5V
-      Probe B (sense)  -> Arduino A0  AND  one leg of a 10k ohm
-                           resistor, whose other leg goes to GND
-                           (this pulls A0 LOW when dry)
+    both dipped in/near the water being monitored) -- no external
+    pull resistor needed, the Uno's internal pull-up on A0 is used
+    instead (enabled in code via INPUT_PULLUP):
+      Probe A (drive) -> Arduino GND
+      Probe B (sense) -> Arduino A0
+                          (internal pull-up holds A0 HIGH when dry)
 
     SSD1306 OLED (I2C, 128x64):
       VCC -> 5V
@@ -43,9 +44,10 @@ const uint8_t LED_PIN = 8;
 const uint8_t BUZZER_PIN = 7;
 
 // ---- Detection tuning ----
-// Raise this if the sensor triggers on humidity/noise alone,
-// lower it if it fails to trigger on light water contact.
-const int WATER_THRESHOLD = 100;
+// Dry reading sits near 1023 (internal pull-up). Water pulls it down.
+// Lower this if the sensor triggers on humidity/noise alone,
+// raise it if it fails to trigger on light water contact.
+const int WATER_THRESHOLD = 900;
 const unsigned long BLINK_INTERVAL_MS = 300;
 const unsigned long BUZZ_INTERVAL_MS = 300;
 
@@ -93,7 +95,7 @@ void showAlertScreen(int reading) {
 void setup() {
   Serial.begin(9600);
 
-  pinMode(WATER_SENSE_PIN, INPUT);
+  pinMode(WATER_SENSE_PIN, INPUT_PULLUP);
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
@@ -116,7 +118,7 @@ void setup() {
 
 void loop() {
   int reading = analogRead(WATER_SENSE_PIN);
-  bool waterDetected = reading > WATER_THRESHOLD;
+  bool waterDetected = reading < WATER_THRESHOLD;
 
   if (waterDetected) {
     showAlertScreen(reading);

@@ -8,11 +8,13 @@ LED, and a buzzer.
 
 Water — even tap water — conducts electricity weakly due to dissolved
 minerals. Two probes are wired so that when both are touching (or bridged
-by) water, current flows between them and raises the voltage read on an
-analog pin. The sketch polls that pin continuously:
+by) water, current flows between them and pulls down the voltage read on
+an analog pin (held high by the Arduino's internal pull-up when dry). The
+sketch polls that pin continuously:
 
-- **Dry / no contact**: analog reading stays low, screen shows `SAFE`.
-- **Water bridges the probes**: reading jumps above `WATER_THRESHOLD`, and
+- **Dry / no contact**: internal pull-up holds the reading high (near
+  1023), screen shows `SAFE`.
+- **Water bridges the probes**: reading drops below `WATER_THRESHOLD`, and
   the board immediately switches to alert mode.
 
 Because the probe pair behaves the same way whether the water is merely wet
@@ -26,15 +28,17 @@ two probes trips it.
 - 0.96" SSD1306 128x64 I2C OLED display
 - LED + ~220 ohm resistor
 - Active buzzer
-- 10k ohm resistor (pull-down)
 - 2 jumper wires (bare ends) as water-sensing probes
+
+No external pull resistor is needed for the water probes — the sketch
+enables the Uno's internal pull-up resistor on `A0` in code instead.
 
 ### Wiring
 
 | Component            | Arduino Pin              |
 |-----------------------|--------------------------|
-| Probe A (drive)       | 5V                       |
-| Probe B (sense)       | A0 (+ 10k resistor to GND) |
+| Probe A (drive)       | GND                      |
+| Probe B (sense)       | A0                       |
 | OLED VCC              | 5V                       |
 | OLED GND              | GND                      |
 | OLED SDA              | A4                       |
@@ -46,9 +50,10 @@ two probes trips it.
 
 Strip about 1cm of insulation off two jumper wires for the probes and space
 their bare tips roughly 1cm apart, both positioned in/near the water to be
-monitored. Probe A stays at a constant 5V; Probe B is pulled to GND by the
-10k resistor so it reads LOW when dry, and rises when water bridges the two
-probes.
+monitored. Probe A stays at a constant GND; Probe B is held HIGH on `A0` by
+the Uno's internal pull-up (enabled via `pinMode(A0, INPUT_PULLUP)`) so it
+reads near 1023 when dry, and drops when water bridges the two probes to
+GND.
 
 ## Arduino IDE Setup
 
@@ -62,9 +67,9 @@ probes.
 
 Edit these values at the top of the sketch if needed:
 
-- `WATER_THRESHOLD` — analog reading (0-1023) above which water is
-  considered detected. Raise it if the sensor false-triggers on humidity or
-  electrical noise; lower it if it misses light water contact.
+- `WATER_THRESHOLD` — analog reading (0-1023) below which water is
+  considered detected. Lower it if the sensor false-triggers on humidity or
+  electrical noise; raise it if it misses light water contact.
 - `BLINK_INTERVAL_MS` / `BUZZ_INTERVAL_MS` — how fast the LED blinks and the
   buzzer pulses while an alert is active.
 - `SCREEN_ADDRESS` — I2C address of your OLED (usually `0x3C`, sometimes
