@@ -78,6 +78,10 @@ const unsigned long BUZZ_INTERVAL_MS = 300;
 // How often to re-send the Telegram alert while water is still detected.
 const unsigned long ALERT_REPEAT_INTERVAL_MS = 60000;
 
+// Give up on Wi-Fi after this long and continue offline (local OLED/LED/
+// buzzer alerts still work; Telegram alerts are skipped until reconnected).
+const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
+
 // ---- OLED settings ----
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -149,7 +153,8 @@ void connectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  while (WiFi.status() != WL_CONNECTED) {
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < WIFI_CONNECT_TIMEOUT_MS) {
     delay(300);
     display.print(".");
     display.display();
@@ -157,10 +162,17 @@ void connectWiFi() {
 
   display.clearDisplay();
   display.setCursor(0, 0);
-  display.println("Wi-Fi connected!");
-  display.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    display.println("Wi-Fi connected!");
+    display.println(WiFi.localIP());
+  } else {
+    display.println("Wi-Fi connect failed.");
+    display.println("Running offline");
+    display.println("(no Telegram alerts).");
+    Serial.println("Wi-Fi connect timed out, continuing offline");
+  }
   display.display();
-  delay(1000);
+  delay(1500);
 }
 
 void showSafeScreen(int reading) {

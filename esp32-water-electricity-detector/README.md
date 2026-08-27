@@ -108,13 +108,19 @@ Edit these values at the top of the sketch:
 - `ALERT_REPEAT_INTERVAL_MS` — how often (in ms) to re-send the Telegram
   alert while water is still detected, so you're not flooded with messages
   every loop iteration. Default is 60000 (1 minute).
+- `WIFI_CONNECT_TIMEOUT_MS` — how long to try connecting to Wi-Fi on boot
+  before giving up and continuing offline. Default is 15000 (15 seconds).
 - `SCREEN_ADDRESS` — I2C address of your OLED (usually `0x3C`, sometimes
   `0x3D`).
 
 ## Behavior
 
-On boot, the OLED shows an initializing message, then connects to Wi-Fi
-(showing progress and the assigned IP once connected). After that, the
+On boot, the OLED shows an initializing message, then tries to connect to
+Wi-Fi for up to `WIFI_CONNECT_TIMEOUT_MS` (showing progress dots). If it
+connects, the OLED shows the assigned IP; if it times out, the OLED shows
+"Wi-Fi connect failed / Running offline" and the sketch continues without
+Wi-Fi — local detection, the OLED, LED, and buzzer all still work, but
+Telegram alerts are skipped until Wi-Fi is available. After that, the
 board continuously samples the water probes:
 
 - **Dry**: screen shows `SAFE` with the live sensor reading; LED, buzzer,
