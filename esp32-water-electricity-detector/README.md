@@ -45,7 +45,7 @@ enables the ESP32's internal pull-up in code instead.
 |-------------------|-------------------------------|
 | Probe A (drive)   | GND                            |
 | Probe B (sense)   | GPIO32                         |
-| OLED VCC          | 3V3                             |
+| OLED VCC          | 5V (see note below)             |
 | OLED GND          | GND                             |
 | OLED SDA          | GPIO21                          |
 | OLED SCL          | GPIO22                          |
@@ -66,6 +66,13 @@ do `analogRead()`, but GPIO34-39 are input-only and have no internal pull
 resistors — they'd need an external one. GPIO32 and GPIO33 are regular
 GPIOs with pull-up/pull-down support, so they're the ones that work with
 this resistor-free wiring.
+
+**Why OLED VCC goes to 5V instead of 3V3:** some SSD1306 modules will
+respond over I2C (and even report a successful `display.begin()`) on 3V3
+but never actually light the panel — their onboard charge pump doesn't get
+enough headroom at 3.3V. If your screen stays dark despite Serial showing
+a successful init, try powering it from 5V instead; SDA/SCL stay 3.3V
+logic either way, since those lines aren't affected by the VCC change.
 
 ## Arduino IDE Setup
 

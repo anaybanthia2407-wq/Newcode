@@ -19,7 +19,8 @@
                           (internal pull-up holds GPIO32 HIGH when dry)
 
     SSD1306 OLED (I2C, 128x64):
-      VCC -> 3V3
+      VCC -> 5V   (some modules won't light the panel off 3V3 even
+                    though I2C still responds -- use 5V if yours is dark)
       GND -> GND
       SDA -> GPIO21
       SCL -> GPIO22
@@ -86,7 +87,7 @@ const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000;
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
-#define SCREEN_ADDRESS 0x3D
+#define SCREEN_ADDRESS 0x3C
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
