@@ -161,8 +161,14 @@ void setup() {
   analogReadResolution(12);
   analogSetPinAttenuation(MQ135_PIN, ADC_11db); // full 0-3.3V input range
 
+  Wire.begin(21, 22); // SDA, SCL -- explicit so it doesn't depend on library defaults
+
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println("SSD1306 allocation failed");
+    // Nothing will appear on the OLED if this fails. Check this Serial
+    // message first: it means the ESP32 got no response at SCREEN_ADDRESS.
+    // Run i2c_scanner.ino to confirm the real address and that the bus
+    // sees the display at all (wiring/power vs. address mismatch).
+    Serial.println("SSD1306 allocation failed -- check wiring/address, see i2c_scanner.ino");
     while (true) delay(1000);
   }
   display.setTextColor(SSD1306_WHITE);

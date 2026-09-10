@@ -79,3 +79,25 @@ are also logged to Serial at 115200 baud.
 
 - The sensor is assumed to be in clean outdoor-reference air (~397 ppm CO2) during the boot-time calibration window. Calibrating indoors in a stuffy room will skew all subsequent readings low relative to the true value.
 - `RZERO` is recalculated on every boot and not persisted; if you need a stable long-term baseline, calibrate once in known-good air, note the printed `rZero` value (add a `Serial.println(rZero);` after `calibrate()` if you want to check it), and hardcode it instead of recalibrating each run.
+
+## Troubleshooting: OLED shows nothing
+
+The sketch halts in `setup()` if `display.begin()` fails, so a completely
+blank screen almost always means the ESP32 never found the OLED on the
+I2C bus — it never gets as far as the warm-up screen.
+
+1. Open Serial Monitor at 115200 baud and reset the board. If you see
+   `SSD1306 allocation failed`, it's an I2C issue, not a display-driving
+   bug.
+2. Upload `i2c_scanner/i2c_scanner.ino` (a standalone sketch) to check
+   what's actually on the bus:
+   - No address found at all → wiring or power problem. Double-check
+     SDA→GPIO21, SCL→GPIO22, VCC→3V3, GND→GND, and that connections
+     are seated (breadboard wires are a common culprit).
+   - An address found, but it's `0x3D` instead of `0x3C` → change
+     `SCREEN_ADDRESS` in `esp32_aqi_detector.ino` to `0x3D`.
+3. If the scanner finds the OLED but the main sketch still fails, make
+   sure both sketches are using the same SDA/SCL pins (21/22) and that
+   nothing else on the bus is holding the lines low.
+4. Some OLED clones are unreliable at 3.3V — try powering VCC from 5V
+   instead if wiring/address both check out and it still won't init.
