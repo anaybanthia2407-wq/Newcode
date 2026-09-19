@@ -24,6 +24,10 @@
       +   -> GPIO25
       -   -> GND
 
+    Alert LED (active-HIGH, with current-limiting resistor) -> ESP32 DevKit V1
+      +   -> GPIO26
+      -   -> GND
+
   Required libraries (install via Arduino Library Manager):
     - Adafruit GFX Library
     - Adafruit SSD1306
@@ -69,6 +73,10 @@ const unsigned long WIFI_RETRY_INTERVAL_MS = 30000;
 #define BUZZER_PIN 25
 #define BUZZER_ENABLED true
 
+// ---- Alert LED ----
+#define LED_PIN 26
+const unsigned long LED_FLASH_INTERVAL_MS = 300;
+
 // ---- OLED settings ----
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -86,6 +94,25 @@ bool lastFireState = false;
 unsigned long lastTelegramSendMs = 0;
 unsigned long lastWifiRetryMs = 0;
 String lastTelegramStatus = "not sent yet";
+
+bool ledState = false;
+unsigned long lastLedToggleMs = 0;
+
+// Flashes LED_PIN on/off every LED_FLASH_INTERVAL_MS while fireDetected is
+// true; keeps it off otherwise. Uses millis() so it doesn't block the loop.
+void updateAlertLed(bool fireDetected) {
+  if (!fireDetected) {
+    ledState = false;
+    digitalWrite(LED_PIN, LOW);
+    return;
+  }
+
+  if (millis() - lastLedToggleMs >= LED_FLASH_INTERVAL_MS) {
+    ledState = !ledState;
+    digitalWrite(LED_PIN, ledState ? HIGH : LOW);
+    lastLedToggleMs = millis();
+  }
+}
 
 void connectWiFi() {
   display.clearDisplay();
@@ -184,6 +211,8 @@ void setup() {
   pinMode(FLAME_DO_PIN, INPUT_PULLUP); // avoids a floating pin reading a false LOW (fire) if the sensor is disconnected
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println("SSD1306 allocation failed");
@@ -210,6 +239,7 @@ void loop() {
   bool fireDetected = (digitalReading == LOW) || (analogReading < ANALOG_ALERT_THRESHOLD);
 
   digitalWrite(BUZZER_PIN, (BUZZER_ENABLED && fireDetected) ? HIGH : LOW);
+  updateAlertLed(fireDetected);
 
   Serial.printf("DO=%d  AO=%d  Fire=%s\n",
                 digitalReading, analogReading, fireDetected ? "YES" : "no");

@@ -1,6 +1,6 @@
 # ESP32 Fire Sensor
 
-A flame/fire detector for the ESP32 DevKit V1 using an MH-Sensor-Series IR flame sensor module and a 128x64 I2C SSD1306 OLED display. The display shows live fire status plus the raw digital and analog sensor readings, an optional buzzer sounds while a flame is detected, and a Telegram bot sends you a message alert over Wi-Fi as soon as fire is detected.
+A flame/fire detector for the ESP32 DevKit V1 using an MH-Sensor-Series IR flame sensor module and a 128x64 I2C SSD1306 OLED display. The display shows live fire status plus the raw digital and analog sensor readings, an optional buzzer sounds while a flame is detected, an LED flashes as a visual alert, and a Telegram bot sends you a message alert over Wi-Fi as soon as fire is detected.
 
 ## Hardware
 
@@ -8,6 +8,7 @@ A flame/fire detector for the ESP32 DevKit V1 using an MH-Sensor-Series IR flame
 - MH-Sensor-Series flame sensor module (IR flame sensor with DO + AO outputs)
 - 0.96" SSD1306 128x64 I2C OLED display
 - Active-HIGH buzzer (optional)
+- LED + current-limiting resistor (e.g. 220Ω–330Ω) for the visual alert
 
 ### Wiring
 
@@ -29,6 +30,11 @@ A flame/fire detector for the ESP32 DevKit V1 using an MH-Sensor-Series IR flame
 |------------|-----------|
 | +          | GPIO25    |
 | -          | GND       |
+
+| Alert LED Pin | ESP32 Pin |
+|----------------|-----------|
+| + (through resistor) | GPIO26 |
+| -              | GND       |
 
 ## Arduino IDE Setup
 
@@ -56,6 +62,7 @@ Edit these values at the top of `esp32_fire_sensor.ino` before uploading:
 - `WIFI_RETRY_INTERVAL_MS` — how often (in milliseconds) to retry the Wi-Fi connection while it's down, whether it never connected at boot or dropped later. Defaults to 30000 (30 seconds).
 - `FLAME_DO_PIN` / `FLAME_AO_PIN` — GPIOs wired to the sensor's digital and analog outputs.
 - `BUZZER_PIN` / `BUZZER_ENABLED` — buzzer GPIO and whether it should sound on detection.
+- `LED_PIN` / `LED_FLASH_INTERVAL_MS` — alert LED GPIO and how fast it flashes (in milliseconds per on/off phase) while a flame is detected.
 - `SCREEN_ADDRESS` — I2C address of your OLED (usually `0x3C`, sometimes `0x3D`).
 - `ANALOG_ALERT_THRESHOLD` — analog reading (0-4095) below which a flame is considered detected even if the digital comparator hasn't tripped. Lower this to require a closer/stronger flame; tune it to your sensor and environment.
 
@@ -63,4 +70,4 @@ Edit these values at the top of `esp32_fire_sensor.ino` before uploading:
 
 On boot, the ESP32 connects to Wi-Fi (showing progress on the OLED); if the connection fails within 15 seconds it continues on with local-only alerts (buzzer + OLED) and keeps retrying the connection every `WIFI_RETRY_INTERVAL_MS` in the background — the same retry also kicks in if a working connection drops later, so a lost network doesn't disable Telegram alerts for good. Every 300ms it then reads both the digital (`DO`) and analog (`AO`) outputs of the flame sensor. `DO` is read with the ESP32's internal pull-up enabled, so a disconnected or floating sensor reads HIGH (no flame) instead of falsely triggering; it goes LOW when the module's onboard comparator detects IR in the flame wavelength range above its trimpot-set sensitivity. `AO` gives a raw 0-4095 reading that drops as the flame gets stronger/closer. A flame is reported when either the digital output trips or the analog reading drops below `ANALOG_ALERT_THRESHOLD`.
 
-While a flame is detected: the buzzer (if enabled) sounds, the OLED shows "FIRE!" with both raw readings and a "CHECK AREA" warning, sensor state is logged over Serial at 115200 baud, and a Telegram message is sent through your bot — immediately when the flame is first detected, then re-sent every `TELEGRAM_RESEND_INTERVAL_MS` while it's still ongoing so the alert doesn't fire just once. The OLED also shows the status of the last Telegram send attempt (`sent`, `no Wi-Fi`, an HTTP error code, etc.) for quick troubleshooting.
+While a flame is detected: the buzzer (if enabled) sounds, the alert LED flashes on/off every `LED_FLASH_INTERVAL_MS`, the OLED shows "FIRE!" with both raw readings and a "CHECK AREA" warning, sensor state is logged over Serial at 115200 baud, and a Telegram message is sent through your bot — immediately when the flame is first detected, then re-sent every `TELEGRAM_RESEND_INTERVAL_MS` while it's still ongoing so the alert doesn't fire just once. The OLED also shows the status of the last Telegram send attempt (`sent`, `no Wi-Fi`, an HTTP error code, etc.) for quick troubleshooting. Once the flame clears, the buzzer stops and the LED turns solidly off.
