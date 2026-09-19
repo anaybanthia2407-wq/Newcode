@@ -43,6 +43,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <ctype.h>
 
 // ---- Wi-Fi credentials ----
 const char *WIFI_SSID = "YOUR_WIFI_SSID";
@@ -55,6 +56,10 @@ const char *TELEGRAM_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID";
 // Minimum time between repeated Telegram alerts while the flame is still
 // detected, so the bot doesn't spam a message every loop iteration.
 const unsigned long TELEGRAM_RESEND_INTERVAL_MS = 60000;
+
+// How often to retry connecting Wi-Fi if it's down (initial failure or a
+// later drop), so a lost connection doesn't disable alerts permanently.
+const unsigned long WIFI_RETRY_INTERVAL_MS = 30000;
 
 // ---- Flame sensor pins ----
 #define FLAME_DO_PIN 27
@@ -77,9 +82,9 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // sensor/environment; lower = closer flame required.
 const int ANALOG_ALERT_THRESHOLD = 1500;
 
-bool wifiReady = false;
 bool lastFireState = false;
 unsigned long lastTelegramSendMs = 0;
+unsigned long lastWifiRetryMs = 0;
 String lastTelegramStatus = "not sent yet";
 
 void connectWiFi() {
@@ -99,11 +104,9 @@ void connectWiFi() {
     display.display();
   }
 
-  wifiReady = (WiFi.status() == WL_CONNECTED);
-
   display.clearDisplay();
   display.setCursor(0, 0);
-  if (wifiReady) {
+  if (WiFi.status() == WL_CONNECTED) {
     display.println("Wi-Fi connected!");
     display.println(WiFi.localIP());
   } else {
@@ -112,6 +115,40 @@ void connectWiFi() {
   }
   display.display();
   delay(1000);
+
+  lastWifiRetryMs = millis();
+}
+
+// Re-attempts the Wi-Fi connection (non-blocking) if it's currently down and
+// enough time has passed since the last attempt. Called every loop so a
+// connection that failed at boot, or dropped later, keeps getting retried.
+void maintainWiFi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return;
+  }
+  if (millis() - lastWifiRetryMs < WIFI_RETRY_INTERVAL_MS) {
+    return;
+  }
+  lastWifiRetryMs = millis();
+  WiFi.disconnect();
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+String urlEncode(const String &value) {
+  String encoded = "";
+  char buf[4];
+  for (size_t i = 0; i < value.length(); i++) {
+    char c = value.charAt(i);
+    if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      encoded += c;
+    } else if (c == ' ') {
+      encoded += "%20";
+    } else {
+      snprintf(buf, sizeof(buf), "%%%02X", (unsigned char)c);
+      encoded += buf;
+    }
+  }
+  return encoded;
 }
 
 // Sends a message through the Telegram bot. Returns true on a 2xx response.
@@ -141,27 +178,10 @@ bool sendTelegramAlert(const String &message) {
   return ok;
 }
 
-String urlEncode(const String &value) {
-  String encoded = "";
-  char buf[4];
-  for (size_t i = 0; i < value.length(); i++) {
-    char c = value.charAt(i);
-    if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') {
-      encoded += c;
-    } else if (c == ' ') {
-      encoded += "%20";
-    } else {
-      snprintf(buf, sizeof(buf), "%%%02X", (unsigned char)c);
-      encoded += buf;
-    }
-  }
-  return encoded;
-}
-
 void setup() {
   Serial.begin(115200);
 
-  pinMode(FLAME_DO_PIN, INPUT);
+  pinMode(FLAME_DO_PIN, INPUT_PULLUP); // avoids a floating pin reading a false LOW (fire) if the sensor is disconnected
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
 
@@ -182,6 +202,8 @@ void setup() {
 }
 
 void loop() {
+  maintainWiFi();
+
   int digitalReading = digitalRead(FLAME_DO_PIN); // LOW = flame detected
   int analogReading = analogRead(FLAME_AO_PIN);   // 0-4095, lower = stronger flame
 
