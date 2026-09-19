@@ -198,9 +198,22 @@ bool sendTelegramAlert(const String &message) {
     int httpCode = https.GET();
     ok = (httpCode >= 200 && httpCode < 300);
     lastTelegramStatus = ok ? "sent" : ("HTTP " + String(httpCode));
+
+    // Telegram's error responses explain exactly what's wrong (bad token,
+    // bad chat_id, bot blocked, etc). Print them so it shows up in Serial
+    // Monitor even though the OLED only has room for the status code.
+    if (!ok) {
+      String body = https.getString();
+      Serial.println("Telegram request failed:");
+      Serial.println("  URL: " + url);
+      Serial.println("  HTTP code: " + String(httpCode));
+      Serial.println("  Response: " + body);
+    }
+
     https.end();
   } else {
     lastTelegramStatus = "connect failed";
+    Serial.println("Telegram request failed: https.begin() returned false (bad URL or TLS setup)");
   }
   return ok;
 }
