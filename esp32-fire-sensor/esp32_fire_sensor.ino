@@ -114,7 +114,22 @@ void updateAlertLed(bool fireDetected) {
   }
 }
 
+// Human-readable form of WiFi.status() for Serial logging.
+const char *wifiStatusText(wl_status_t status) {
+  switch (status) {
+    case WL_NO_SSID_AVAIL: return "SSID not found (check WIFI_SSID / 2.4GHz band)";
+    case WL_CONNECT_FAILED: return "connect failed (check WIFI_PASSWORD)";
+    case WL_CONNECTION_LOST: return "connection lost";
+    case WL_DISCONNECTED: return "disconnected";
+    case WL_IDLE_STATUS: return "idle";
+    case WL_CONNECTED: return "connected";
+    default: return "unknown";
+  }
+}
+
 void connectWiFi() {
+  Serial.println("Connecting to Wi-Fi: " + String(WIFI_SSID));
+
   display.clearDisplay();
   display.setCursor(0, 0);
   display.println("Connecting to");
@@ -136,9 +151,11 @@ void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     display.println("Wi-Fi connected!");
     display.println(WiFi.localIP());
+    Serial.println("Wi-Fi connected, IP: " + WiFi.localIP().toString());
   } else {
     display.println("Wi-Fi failed.");
     display.println("Alerts local only.");
+    Serial.println("Wi-Fi failed to connect: " + String(wifiStatusText(WiFi.status())));
   }
   display.display();
   delay(1000);
@@ -157,6 +174,7 @@ void maintainWiFi() {
     return;
   }
   lastWifiRetryMs = millis();
+  Serial.println("Wi-Fi still down (" + String(wifiStatusText(WiFi.status())) + "), retrying...");
   WiFi.disconnect();
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
