@@ -3,8 +3,8 @@
  * Board : ESP32 DevKit V1 (ESP32-WROOM-32)
  *
  * Uses the ESP32's built-in Hall-effect sensor to detect a nearby magnetic
- * field. The on-board LED blinks while a field is present (faster for a
- * stronger field) and a 16x2 I2C LCD shows the magnetic flux density in its
+ * field. An external LED (plus the on-board LED) blinks while a field is
+ * present (faster for a stronger field) and a 16x2 I2C LCD shows the magnetic flux density in its
  * SI unit, the tesla (displayed as mT, or uT for weak fields).
  *
  * IMPORTANT: hallRead() only exists in Arduino-ESP32 core 1.x / 2.x.
@@ -13,6 +13,10 @@
  *
  * The Hall sensor is read internally through GPIO36 (VP) and GPIO39 (VN):
  * leave both pins unconnected.
+ *
+ * External LED wiring:
+ *   GPIO4 (D4) -> 220 ohm resistor -> LED long leg (+)
+ *   LED short leg (-) -> GND
  *
  * Serial commands (115200 baud, newline terminated):
  *   z          re-zero: measure the background field with no magnet nearby
@@ -36,7 +40,8 @@
 #include <Preferences.h>
 
 // ---------------- Hardware ----------------
-const uint8_t LED_PIN   = 2;      // On-board blue LED on DevKit V1
+const uint8_t EXT_LED_PIN     = 4;  // External LED (via 220 ohm resistor to GND)
+const uint8_t ONBOARD_LED_PIN = 2;  // On-board blue LED on DevKit V1
 const uint8_t LCD_ADDR  = 0x27;   // Try 0x3F if the screen stays blank
 const uint8_t LCD_COLS  = 16;
 const uint8_t LCD_ROWS  = 2;
@@ -148,10 +153,15 @@ void formatField(float mT, char *out, size_t len) {
   }
 }
 
+void setLeds(bool on) {
+  digitalWrite(EXT_LED_PIN, on ? HIGH : LOW);
+  digitalWrite(ONBOARD_LED_PIN, on ? HIGH : LOW);
+}
+
 void updateLed() {
   if (!fieldPresent) {
     ledState = false;
-    digitalWrite(LED_PIN, LOW);
+    setLeds(false);
     return;
   }
   float strength = constrain(fabsf(fieldmT) / BLINK_FULL_SCALE_MT, 0.0f, 1.0f);
@@ -160,7 +170,7 @@ void updateLed() {
   if (now - lastToggleMs >= period / 2) {
     lastToggleMs = now;
     ledState = !ledState;
-    digitalWrite(LED_PIN, ledState);
+    setLeds(ledState);
   }
 }
 
@@ -188,8 +198,9 @@ void updateLcd() {
 
 void setup() {
   Serial.begin(115200);
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
+  pinMode(EXT_LED_PIN, OUTPUT);
+  pinMode(ONBOARD_LED_PIN, OUTPUT);
+  setLeds(false);
 
   Wire.begin(I2C_SDA, I2C_SCL);
   lcd.init();

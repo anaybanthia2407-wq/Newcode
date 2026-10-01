@@ -2,7 +2,7 @@
 
 Detects magnetic fields using the **built-in Hall-effect sensor** of the ESP32 DevKit V1. You don't need an external sensor.
 
-- The **on-board LED (GPIO2) blinks** while a magnetic field is present. It blinks faster as the field gets stronger.
+- An **external LED on GPIO4** (and the on-board LED on GPIO2) **blinks** while a magnetic field is present. It blinks faster as the field gets stronger.
 - A **16x2 I2C LCD** shows the magnetic flux density in its SI unit, the **tesla (T)**. Readings of 1 mT or more show as **millitesla (mT)**, and weaker readings show as **microtesla (uT)**.
 - The LCD's second line shows whether a magnet is detected and which pole (+ / -) faces the chip.
 
@@ -10,6 +10,7 @@ Detects magnetic fields using the **built-in Hall-effect sensor** of the ESP32 D
 
 - ESP32 DevKit V1 (ESP32-WROOM-32, the original ESP32. The S2/S3/C3 chips have **no** Hall sensor.)
 - 16x2 character LCD with a PCF8574 I2C backpack
+- 1 LED and a 220 Ω resistor
 - A magnet to test with
 
 ### Wiring
@@ -21,7 +22,12 @@ Detects magnetic fields using the **built-in Hall-effect sensor** of the ESP32 D
 | SDA                | GPIO21    |
 | SCL                | GPIO22    |
 
-The LED is the board's built-in blue LED on GPIO2. If you want an external LED, wire it as GPIO2 → 220 Ω → LED → GND.
+| LED                | ESP32 Pin |
+|--------------------|-----------|
+| Long leg (+, anode) via 220 Ω resistor | D4 (GPIO4) |
+| Short leg (−, cathode) | GND |
+
+The board's built-in blue LED on GPIO2 blinks along with the external LED. To use a different pin for the external LED, change `EXT_LED_PIN`.
 
 > Do **not** connect anything to **GPIO36 (VP)** or **GPIO39 (VN)**. The Hall sensor is read through these pins internally.
 
