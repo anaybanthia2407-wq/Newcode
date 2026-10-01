@@ -83,11 +83,14 @@ bool     ledState      = false;
 uint32_t lastToggleMs  = 0;
 uint32_t lastLcdMs     = 0;
 
-// Calls init() or begin(), whichever the installed LiquidCrystal_I2C provides
-template <typename T>
-auto lcdStart(T &l, int) -> decltype(l.init(), void()) { l.init(); }
-template <typename T>
-auto lcdStart(T &l, long) -> decltype(l.begin(), void()) { l.begin(); }
+// Calls init() or begin(), whichever the installed LiquidCrystal_I2C provides.
+// Kept inside a struct because the Arduino IDE breaks top-level templates.
+struct LcdStarter {
+  template <typename T>
+  static auto start(T &l, int) -> decltype(l.init(), void()) { l.init(); }
+  template <typename T>
+  static auto start(T &l, long) -> decltype(l.begin(), void()) { l.begin(); }
+};
 
 // Returns the first I2C device address found, or 0 if none
 uint8_t findLcdAddress() {
@@ -107,7 +110,7 @@ void setupLcd() {
     Serial.printf("LCD found at I2C address 0x%02X\n", addr);
   }
   lcd = new LiquidCrystal_I2C(addr, LCD_COLS, LCD_ROWS);
-  lcdStart(*lcd, 0);
+  LcdStarter::start(*lcd, 0);
   lcd->backlight();
   lcd->clear();
 }
