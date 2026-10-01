@@ -39,14 +39,14 @@ The Hall sensor sits **under the metal shield of the ESP32 module**. Bring the m
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
 2. In Boards Manager, install **esp32 by Espressif, version 2.0.17**.
    `hallRead()` was removed in core 3.x. The sketch stops with a clear error if you compile it against 3.x.
-3. In Library Manager, install **LiquidCrystal I2C** by Frank de Brabander.
+3. In Library Manager, install **LiquidCrystal I2C** by Frank de Brabander. The sketch also works with the GitHub version of that library, which uses `begin()` instead of `init()`. Keep only one of them installed.
 4. Select the **ESP32 Dev Module** board and your COM port, then upload.
 
 ## Configuration
 
 These values are at the top of `esp32_hall_magnetometer.ino`:
 
-- `LCD_ADDR`: the I2C address of the LCD, usually `0x27` and sometimes `0x3F`.
+- `LCD_ADDR_DEFAULT`: the LCD's I2C address is detected automatically at startup and printed to the Serial Monitor. This value is only a fallback for when no device is found.
 - `DETECT_ON_MT` / `DETECT_OFF_MT`: the detection threshold in mT, with hysteresis so the LED doesn't flicker.
 - `BLINK_FULL_SCALE_MT`: the field at which the LED blinks fastest.
 - `DEFAULT_MT_PER_COUNT`: the sensitivity used until you calibrate.

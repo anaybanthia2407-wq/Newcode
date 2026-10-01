@@ -24,6 +24,9 @@
  *              then send e.g. "c 25" to compute the counts-to-mT factor
  *   s          print current settings
  * Calibration is stored in flash and survives a reboot.
+ *
+ * The LCD's I2C address is found automatically at startup, and the sketch
+ * works with both common "LiquidCrystal_I2C" libraries (init() or begin()).
  */
 
 #if defined(__has_include)
@@ -42,7 +45,7 @@
 // ---------------- Hardware ----------------
 const uint8_t EXT_LED_PIN     = 4;  // External LED (via 220 ohm resistor to GND)
 const uint8_t ONBOARD_LED_PIN = 2;  // On-board blue LED on DevKit V1
-const uint8_t LCD_ADDR  = 0x27;   // Try 0x3F if the screen stays blank
+const uint8_t LCD_ADDR_DEFAULT = 0x27;  // Used only if the I2C scan finds nothing
 const uint8_t LCD_COLS  = 16;
 const uint8_t LCD_ROWS  = 2;
 const uint8_t I2C_SDA   = 21;
@@ -68,7 +71,7 @@ const float    BLINK_FULL_SCALE_MT = 20.0f;  // field at which blinking is faste
 
 const uint32_t LCD_UPDATE_MS = 250;
 
-LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
+LiquidCrystal_I2C *lcd = nullptr;
 Preferences prefs;
 
 float zeroOffset   = 0.0f;   // background reading in raw counts
@@ -80,6 +83,43 @@ bool     ledState      = false;
 uint32_t lastToggleMs  = 0;
 uint32_t lastLcdMs     = 0;
 
+// Calls init() or begin(), whichever the installed LiquidCrystal_I2C provides
+template <typename T>
+auto lcdStart(T &l, int) -> decltype(l.init(), void()) { l.init(); }
+template <typename T>
+auto lcdStart(T &l, long) -> decltype(l.begin(), void()) { l.begin(); }
+
+// Returns the first I2C device address found, or 0 if none
+uint8_t findLcdAddress() {
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) return addr;
+  }
+  return 0;
+}
+
+void setupLcd() {
+  uint8_t addr = findLcdAddress();
+  if (addr == 0) {
+    Serial.println("No I2C LCD found! Check SDA->D21, SCL->D22, VCC->VIN, GND->GND.");
+    addr = LCD_ADDR_DEFAULT;
+  } else {
+    Serial.printf("LCD found at I2C address 0x%02X\n", addr);
+  }
+  lcd = new LiquidCrystal_I2C(addr, LCD_COLS, LCD_ROWS);
+  lcdStart(*lcd, 0);
+  lcd->backlight();
+  lcd->clear();
+}
+
+// Prints text on one LCD row, padded to the full width so old text is erased
+void lcdLine(uint8_t row, const char *text) {
+  char buf[LCD_COLS + 1];
+  snprintf(buf, sizeof(buf), "%-16s", text);
+  lcd->setCursor(0, row);
+  lcd->print(buf);
+}
+
 // Averaged raw Hall reading
 float readHallRaw(int samples = SAMPLES_PER_READING) {
   long sum = 0;
@@ -90,11 +130,8 @@ float readHallRaw(int samples = SAMPLES_PER_READING) {
 }
 
 void zeroSensor() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Zeroing sensor..");
-  lcd.setCursor(0, 1);
-  lcd.print("Keep magnet away");
+  lcdLine(0, "Zeroing sensor..");
+  lcdLine(1, "Keep magnet away");
   Serial.println("Zeroing: keep magnets away from the board...");
 
   float sum = 0;
@@ -106,7 +143,6 @@ void zeroSensor() {
   fieldmT = 0.0f;
   prefs.putFloat("zero", zeroOffset);
   Serial.printf("Zero offset = %.2f counts\n", zeroOffset);
-  lcd.clear();
 }
 
 void calibrate(float knownmT) {
@@ -181,15 +217,13 @@ void updateLcd() {
 
   char line[LCD_COLS + 1];
   formatField(fieldmT, line, sizeof(line));
-  lcd.setCursor(0, 0);
-  lcd.printf("%-16s", line);
+  lcdLine(0, line);
 
-  lcd.setCursor(0, 1);
   if (fieldPresent) {
     // Sign of the reading tells which pole faces the chip
-    lcd.print(fieldmT >= 0 ? "MAGNET! Pole: + " : "MAGNET! Pole: - ");
+    lcdLine(1, fieldmT >= 0 ? "MAGNET! Pole: +" : "MAGNET! Pole: -");
   } else {
-    lcd.print("No magnet       ");
+    lcdLine(1, "No magnet");
   }
 
   Serial.printf("raw=%.1f  B=%.3f mT  %s\n", fieldmT / mTPerCount + zeroOffset,
@@ -203,12 +237,9 @@ void setup() {
   setLeds(false);
 
   Wire.begin(I2C_SDA, I2C_SCL);
-  lcd.init();
-  lcd.backlight();
-  lcd.setCursor(0, 0);
-  lcd.print("ESP32 Hall Meter");
-  lcd.setCursor(0, 1);
-  lcd.print("Unit: tesla (T)");
+  setupLcd();
+  lcdLine(0, "ESP32 Hall Meter");
+  lcdLine(1, "Unit: tesla (T)");
   delay(1500);
 
   prefs.begin("hallmeter", false);
