@@ -4,9 +4,12 @@
  *
  * Uses the ESP32's built-in Hall-effect sensor to detect a nearby magnetic
  * field. An external LED (plus the on-board LED) blinks while a field is
- * present (faster for a stronger field) and a 128x64 SSD1306 OLED shows the
- * magnetic flux density in its SI unit, the tesla (displayed as mT, or uT
- * for weak fields).
+ * present (faster for a stronger field), a second LED stays solidly ON while
+ * a field is detected, and a 128x64 SSD1306 OLED shows the magnetic flux
+ * density in its SI unit, the tesla (displayed in mT).
+ *
+ * Serial Plotter (Tools > Serial Plotter, 115200 baud) graphs the field
+ * strength and a "Magnet" line that goes high while a magnet is detected.
  *
  * IMPORTANT: hallRead() only exists in Arduino-ESP32 core 1.x / 2.x.
  * It was removed in core 3.x, so install "esp32 by Espressif" version 2.0.17
@@ -18,9 +21,9 @@
  *   SDA -> GPIO21 (D21)
  *   SCL -> GPIO22 (D22)
  *
- * External LED wiring:
- *   GPIO4 (D4) -> 220 ohm resistor -> LED long leg (+)
- *   LED short leg (-) -> GND
+ * External LED wiring (each LED with its own 220 ohm resistor):
+ *   Blinking LED : GPIO4  (D4)  -> 220 ohm -> LED long leg (+), short leg (-) -> GND
+ *   Detect LED   : GPIO18 (D18) -> 220 ohm -> LED long leg (+), short leg (-) -> GND
  *
  * The Hall sensor is read internally through GPIO36 (VP) and GPIO39 (VN):
  * leave both pins unconnected.
@@ -52,7 +55,8 @@
 #include <Preferences.h>
 
 // ---------------- Hardware ----------------
-const uint8_t EXT_LED_PIN     = 4;  // External LED (via 220 ohm resistor to GND)
+const uint8_t EXT_LED_PIN     = 4;  // External LED, blinks faster for a stronger field
+const uint8_t DETECT_LED_PIN  = 18; // External LED, solid ON while a magnet is detected
 const uint8_t ONBOARD_LED_PIN = 2;  // On-board blue LED on DevKit V1
 const uint8_t I2C_SDA = 21;
 const uint8_t I2C_SCL = 22;
@@ -64,9 +68,11 @@ const uint8_t I2C_SCL = 22;
 #define SCREEN_ADDRESS 0x3C   // Found with the I2C scanner
 
 // ---------------- Measurement ----------------
-const int   SAMPLES_PER_READING = 64;    // averaging, the raw sensor is noisy
+const int   SAMPLES_PER_BLOCK   = 32;    // hallRead() samples averaged per block
+const int   BLOCKS_PER_READING  = 9;     // median of block averages rejects spikes
 const int   ZERO_SAMPLES        = 40;    // readings averaged for the zero offset
-const float EMA_ALPHA           = 0.3f;  // display smoothing (0..1, higher = faster)
+const float EMA_ALPHA           = 0.15f; // smoothing (0..1, lower = steadier but slower)
+const float DEADBAND_MT         = 0.5f;  // readings smaller than this are shown as 0
 
 // Default sensitivity, approximate and varies from chip to chip.
 // Run the "c <mT>" calibration for accurate readings.
@@ -82,6 +88,10 @@ const uint32_t BLINK_FAST_MS = 60;
 const float    BLINK_FULL_SCALE_MT = 20.0f;  // field at which blinking is fastest
 
 const uint32_t DISPLAY_UPDATE_MS = 250;
+const uint32_t PLOT_UPDATE_MS    = 50;
+
+// Height of the "Magnet" line in the Serial Plotter while a magnet is detected
+const float PLOT_MAGNET_HIGH_MT = 10.0f;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Preferences prefs;
@@ -94,6 +104,7 @@ bool  fieldPresent = false;
 bool     ledState      = false;
 uint32_t lastToggleMs  = 0;
 uint32_t lastDisplayMs = 0;
+uint32_t lastPlotMs    = 0;
 
 // Shows up to two lines of size-1 text, used for status messages
 void showMessage(const char *line1, const char *line2) {
@@ -105,13 +116,34 @@ void showMessage(const char *line1, const char *line2) {
   display.display();
 }
 
-// Averaged raw Hall reading
-float readHallRaw(int samples = SAMPLES_PER_READING) {
+// Average of one block of raw Hall samples
+float readHallBlock() {
   long sum = 0;
-  for (int i = 0; i < samples; i++) {
+  for (int i = 0; i < SAMPLES_PER_BLOCK; i++) {
     sum += hallRead();
   }
-  return (float)sum / samples;
+  return (float)sum / SAMPLES_PER_BLOCK;
+}
+
+// Median of several block averages: steadier than a plain average because
+// occasional noise spikes are thrown away instead of averaged in
+float readHallRaw() {
+  float blocks[BLOCKS_PER_READING];
+  for (int i = 0; i < BLOCKS_PER_READING; i++) {
+    float v = readHallBlock();
+    int j = i;
+    while (j > 0 && blocks[j - 1] > v) {   // insertion sort
+      blocks[j] = blocks[j - 1];
+      j--;
+    }
+    blocks[j] = v;
+  }
+  return blocks[BLOCKS_PER_READING / 2];
+}
+
+// Field with small noise around zero removed
+float shownField() {
+  return fabsf(fieldmT) < DEADBAND_MT ? 0.0f : fieldmT;
 }
 
 void zeroSensor() {
@@ -129,7 +161,11 @@ void zeroSensor() {
 }
 
 void calibrate(float knownmT) {
-  float delta = readHallRaw(SAMPLES_PER_READING * 8) - zeroOffset;
+  float sum = 0;
+  for (int i = 0; i < 8; i++) {
+    sum += readHallRaw();
+  }
+  float delta = sum / 8 - zeroOffset;
   if (fabsf(delta) < 3.0f || knownmT == 0.0f) {
     Serial.println("Calibration failed: field too weak. Bring the magnet closer.");
     return;
@@ -169,6 +205,8 @@ void setLeds(bool on) {
 }
 
 void updateLed() {
+  digitalWrite(DETECT_LED_PIN, fieldPresent ? HIGH : LOW);
+
   if (!fieldPresent) {
     ledState = false;
     setLeds(false);
@@ -196,24 +234,17 @@ void updateDisplay() {
   display.setCursor(0, 0);
   display.println("Magnetic Field (B)");
 
-  // Value in large text, with an SI prefix that fits the width
+  // Value in large text
+  float shown = shownField();
   char value[12];
-  const char *unit;
-  if (fabsf(fieldmT) < 1.0f) {
-    snprintf(value, sizeof(value), "%+.0f", fieldmT * 1000.0f);
-    unit = "uT";
-  } else {
-    snprintf(value, sizeof(value), "%+.2f", fieldmT);
-    unit = "mT";
-  }
+  snprintf(value, sizeof(value), "%+.1f", shown);
   display.setTextSize(2);
   display.setCursor(0, 16);
   display.print(value);
-  display.print(" ");
-  display.print(unit);
+  display.print(" mT");
 
   // Strength bar
-  int barWidth = (int)(constrain(fabsf(fieldmT) / BLINK_FULL_SCALE_MT, 0.0f, 1.0f) * (SCREEN_WIDTH - 2));
+  int barWidth = (int)(constrain(fabsf(shown) / BLINK_FULL_SCALE_MT, 0.0f, 1.0f) * (SCREEN_WIDTH - 2));
   display.drawRect(0, 38, SCREEN_WIDTH, 8, SSD1306_WHITE);
   display.fillRect(1, 39, barWidth, 6, SSD1306_WHITE);
 
@@ -228,16 +259,27 @@ void updateDisplay() {
   }
 
   display.display();
+}
 
-  Serial.printf("raw=%.1f  B=%.3f mT  %s\n", fieldmT / mTPerCount + zeroOffset,
-                fieldmT, fieldPresent ? "DETECTED" : "-");
+// One line per update in "label:value" form for the Arduino Serial Plotter.
+// "Magnet" jumps high while a magnet is detected and stays at 0 otherwise.
+void updatePlot() {
+  uint32_t now = millis();
+  if (now - lastPlotMs < PLOT_UPDATE_MS) return;
+  lastPlotMs = now;
+
+  Serial.printf("Field_mT:%.2f,Magnet:%.1f,Threshold:%.1f\n",
+                fabsf(shownField()), fieldPresent ? PLOT_MAGNET_HIGH_MT : 0.0f,
+                DETECT_ON_MT);
 }
 
 void setup() {
   Serial.begin(115200);
   pinMode(EXT_LED_PIN, OUTPUT);
+  pinMode(DETECT_LED_PIN, OUTPUT);
   pinMode(ONBOARD_LED_PIN, OUTPUT);
   setLeds(false);
+  digitalWrite(DETECT_LED_PIN, LOW);
 
   Wire.begin(I2C_SDA, I2C_SCL);
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
@@ -272,4 +314,5 @@ void loop() {
 
   updateLed();
   updateDisplay();
+  updatePlot();
 }

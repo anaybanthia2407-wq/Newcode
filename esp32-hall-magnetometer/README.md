@@ -3,14 +3,16 @@
 Detects magnetic fields using the **built-in Hall-effect sensor** of the ESP32 DevKit V1. You don't need an external sensor.
 
 - An **external LED on GPIO4** (and the on-board LED on GPIO2) **blinks** while a magnetic field is present. It blinks faster as the field gets stronger.
-- A **128x64 SSD1306 I2C OLED** shows the magnetic flux density in its SI unit, the **tesla (T)**. Readings of 1 mT or more show as **millitesla (mT)**, and weaker readings show as **microtesla (uT)**.
+- A second external **LED on GPIO18 stays solidly ON** while a magnet is detected.
+- A **128x64 SSD1306 I2C OLED** shows the magnetic flux density in its SI unit, the **tesla (T)**, in millitesla (mT).
+- The **Arduino Serial Plotter** graphs the field strength, plus a `Magnet` line that goes high while a magnet is detected.
 - The OLED also shows a strength bar, whether a magnet is detected, and which pole (+ / -) faces the chip.
 
 ## Hardware
 
 - ESP32 DevKit V1 (ESP32-WROOM-32, the original ESP32. The S2/S3/C3 chips have **no** Hall sensor.)
 - 0.96" SSD1306 128x64 I2C OLED display (address `0x3C`)
-- 1 LED and a 220 Ω resistor
+- 2 LEDs and two 220 Ω resistors
 - A magnet to test with
 
 ### Wiring
@@ -24,8 +26,9 @@ Detects magnetic fields using the **built-in Hall-effect sensor** of the ESP32 D
 
 | LED                | ESP32 Pin |
 |--------------------|-----------|
-| Long leg (+, anode) via 220 Ω resistor | D4 (GPIO4) |
-| Short leg (−, cathode) | GND |
+| Blinking LED long leg (+) via 220 Ω resistor | D4 (GPIO4) |
+| Detect LED long leg (+) via 220 Ω resistor | D18 (GPIO18) |
+| Both LEDs' short legs (−) | GND |
 
 The board's built-in blue LED on GPIO2 blinks along with the external LED. To use a different pin for the external LED, change `EXT_LED_PIN`.
 
@@ -63,13 +66,21 @@ The built-in sensor gives raw, uncalibrated counts, and its sensitivity varies f
 
 Unit reminder: 1 T = 1000 mT = 1,000,000 uT. Earth's field is about 25–65 uT, which is below this sensor's noise floor. A small neodymium magnet produces several mT up to hundreds of mT at its surface.
 
+## Serial Plotter
+
+Open **Tools → Serial Plotter** at **115200 baud**. It graphs three lines:
+
+- `Field_mT`: the field strength in mT (always positive, whichever pole faces the chip).
+- `Magnet`: 0 with no magnet, and jumps to 10 while a magnet is detected.
+- `Threshold`: the detection level, as a flat reference line.
+
 ## How it works
 
-1. Each reading averages 64 `hallRead()` samples to reduce noise.
+1. Each reading takes 9 blocks of 32 `hallRead()` samples, averages each block, and keeps the median block. This throws away noise spikes.
 2. The zero offset measured at boot is subtracted.
-3. The result is multiplied by the calibration factor to convert to mT, then smoothed with an exponential moving average.
+3. The result is multiplied by the calibration factor to convert to mT, then smoothed with an exponential moving average. Readings under 0.5 mT are shown as 0 so the display doesn't flicker from noise.
 4. When |B| goes above the detection threshold, the LED starts blinking. The blink period shrinks from 800 ms to 60 ms as the field rises toward `BLINK_FULL_SCALE_MT`.
-5. The OLED and Serial output update every 250 ms.
+5. The OLED updates every 250 ms, and the Serial Plotter data every 50 ms.
 
 ## Limitations
 
