@@ -3,21 +3,21 @@
 Detects magnetic fields using the **built-in Hall-effect sensor** of the ESP32 DevKit V1. You don't need an external sensor.
 
 - An **external LED on GPIO4** (and the on-board LED on GPIO2) **blinks** while a magnetic field is present. It blinks faster as the field gets stronger.
-- A **16x2 I2C LCD** shows the magnetic flux density in its SI unit, the **tesla (T)**. Readings of 1 mT or more show as **millitesla (mT)**, and weaker readings show as **microtesla (uT)**.
-- The LCD's second line shows whether a magnet is detected and which pole (+ / -) faces the chip.
+- A **128x64 SSD1306 I2C OLED** shows the magnetic flux density in its SI unit, the **tesla (T)**. Readings of 1 mT or more show as **millitesla (mT)**, and weaker readings show as **microtesla (uT)**.
+- The OLED also shows a strength bar, whether a magnet is detected, and which pole (+ / -) faces the chip.
 
 ## Hardware
 
 - ESP32 DevKit V1 (ESP32-WROOM-32, the original ESP32. The S2/S3/C3 chips have **no** Hall sensor.)
-- 16x2 character LCD with a PCF8574 I2C backpack
+- 0.96" SSD1306 128x64 I2C OLED display (address `0x3C`)
 - 1 LED and a 220 Ω resistor
 - A magnet to test with
 
 ### Wiring
 
-| LCD (I2C backpack) | ESP32 Pin |
+| OLED Pin           | ESP32 Pin |
 |--------------------|-----------|
-| VCC                | VIN (5V)  |
+| VCC                | 3V3       |
 | GND                | GND       |
 | SDA                | GPIO21    |
 | SCL                | GPIO22    |
@@ -39,14 +39,14 @@ The Hall sensor sits **under the metal shield of the ESP32 module**. Bring the m
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
 2. In Boards Manager, install **esp32 by Espressif, version 2.0.17**.
    `hallRead()` was removed in core 3.x. The sketch stops with a clear error if you compile it against 3.x.
-3. In Library Manager, install **LiquidCrystal I2C** by Frank de Brabander. The sketch also works with the GitHub version of that library, which uses `begin()` instead of `init()`. Keep only one of them installed.
+3. In Library Manager, install **Adafruit SSD1306** and **Adafruit GFX Library**.
 4. Select the **ESP32 Dev Module** board and your COM port, then upload.
 
 ## Configuration
 
 These values are at the top of `esp32_hall_magnetometer.ino`:
 
-- `LCD_ADDR_DEFAULT`: the LCD's I2C address is detected automatically at startup and printed to the Serial Monitor. This value is only a fallback for when no device is found.
+- `SCREEN_ADDRESS`: the OLED's I2C address, usually `0x3C` and sometimes `0x3D`. Run an I2C scanner sketch if you're not sure.
 - `DETECT_ON_MT` / `DETECT_OFF_MT`: the detection threshold in mT, with hysteresis so the LED doesn't flicker.
 - `BLINK_FULL_SCALE_MT`: the field at which the LED blinks fastest.
 - `DEFAULT_MT_PER_COUNT`: the sensitivity used until you calibrate.
@@ -69,7 +69,7 @@ Unit reminder: 1 T = 1000 mT = 1,000,000 uT. Earth's field is about 25–65 uT, 
 2. The zero offset measured at boot is subtracted.
 3. The result is multiplied by the calibration factor to convert to mT, then smoothed with an exponential moving average.
 4. When |B| goes above the detection threshold, the LED starts blinking. The blink period shrinks from 800 ms to 60 ms as the field rises toward `BLINK_FULL_SCALE_MT`.
-5. The LCD and Serial output update every 250 ms.
+5. The OLED and Serial output update every 250 ms.
 
 ## Limitations
 
