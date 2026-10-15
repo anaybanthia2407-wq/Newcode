@@ -5,7 +5,7 @@
  * car/object passing underneath. At night the LED turns on while the object
  * is under the sensor and turns off once it has passed. During the day the
  * LED stays off no matter what the IR sensor sees. A 16x2 I2C LCD shows the
- * current mode, light level, detection state, LED state and a pass counter.
+ * current mode, light level, detection state and LED state.
  *
  * Hardware: ESP32 DevKit V1, IR obstacle sensor module, LDR + 10k resistor,
  *           LED + 220R resistor, 16x2 LCD with I2C (PCF8574) backpack.
