@@ -27,11 +27,11 @@ At night the LED turns on when an object arrives and turns off once it has passe
 |--------|-----------|
 | VCC    | 3V3       |
 | GND    | GND       |
-| OUT    | GPIO27    |
+| OUT    | GPIO35    |
 
 ### LDR (voltage divider)
 ```
-3V3 ──── LDR ────┬──── GPIO34
+3V3 ──── LDR ────┬──── GPIO32
                  │
                10kΩ
                  │
@@ -39,11 +39,11 @@ GND ─────────────┘
 ```
 More light gives a higher reading (0–4095).
 
-> Using an LDR **module** (VCC/GND/AO/DO) instead? Connect AO to GPIO34 and set `LDR_INVERTED = true`, since most modules output a lower voltage in bright light.
+> Using an LDR **module** (VCC/GND/AO/DO) instead? Connect AO to GPIO32 and set `LDR_INVERTED = true`, since most modules output a lower voltage in bright light.
 
 ### LED
 ```
-GPIO26 ──── 220Ω ──── LED (+, long leg)   LED (−, short leg) ──── GND
+GPIO18 ──── 220Ω ──── LED (+, long leg)   LED (−, short leg) ──── GND
 ```
 
 ### I2C LCD

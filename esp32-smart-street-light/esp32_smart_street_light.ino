@@ -15,9 +15,9 @@
 #include <LiquidCrystal_I2C.h>
 
 // ---------------- Pins ----------------
-const int IR_PIN  = 27;  // IR sensor OUT (digital)
-const int LDR_PIN = 34;  // LDR voltage divider (ADC1, input-only pin)
-const int LED_PIN = 26;  // Street light LED (through 220R)
+const int IR_PIN  = 35;  // IR sensor OUT (digital, input-only pin)
+const int LDR_PIN = 32;  // LDR voltage divider (ADC1)
+const int LED_PIN = 18;  // Street light LED (through 220R)
 // LCD uses the default I2C pins: SDA = GPIO21, SCL = GPIO22
 
 // ---------------- Settings ----------------
