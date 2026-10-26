@@ -17,7 +17,9 @@ At night the LED turns on when an object arrives and turns off once it has passe
 - IR obstacle avoidance sensor module (3 pins: VCC, GND, OUT)
 - LDR (photoresistor) + 10 kΩ resistor
 - LED (any colour) + 220 Ω resistor
-- 16x2 LCD with I2C backpack (PCF8574)
+- Display, either one (detected automatically):
+  - 0.96" SSD1306 128x64 I2C OLED (address 0x3C), or
+  - 16x2 LCD with I2C backpack (PCF8574, address 0x27 / 0x3F)
 - Breadboard and jumper wires
 
 ## Wiring
@@ -60,7 +62,7 @@ The LCD needs 5V for proper contrast, so power it from VIN while the board is on
 
 1. Install the ESP32 board package (File > Preferences > Additional Board Manager URLs):
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-2. No extra libraries are needed. The sketch drives the I2C LCD itself using the built-in `Wire` library, so it is not affected by conflicting LiquidCrystal_I2C versions.
+2. Install **Adafruit SSD1306** and **Adafruit GFX Library** from Library Manager (needed for the OLED). The 16x2 LCD needs no library: the sketch drives it directly over `Wire`, so it is not affected by conflicting LiquidCrystal_I2C versions.
 3. Select board **ESP32 Dev Module** and the correct COM port, then upload `esp32_smart_street_light.ino`.
 
 ## Calibration
@@ -79,7 +81,8 @@ These values are at the top of the sketch:
 - `LDR_INVERTED`: set to `true` if your LDR reading goes down as the light gets brighter.
 - `NIGHT_THRESHOLD` / `DAY_THRESHOLD`: the day/night switching points, with hysteresis between them.
 - `OBJECT_CLEAR_MS`: how long the IR sensor must see nothing before the object counts as passed and the LED turns off (default 300 ms). This stops the light flickering in gaps along a car.
-- LCD address: detected automatically (0x27, 0x3F, etc.) and printed on Serial Monitor at startup. If it prints "LCD not found", check the SDA/SCL/VCC/GND wiring.
+- Display: OLED or LCD is detected automatically from its I2C address and shown at the end of every Serial Monitor line (e.g. `Display:OLED 0x3C`). `OLED_HEIGHT` can be set to 32 for a 128x32 OLED.
+- `IR_AUTO_DETECT`: learns the IR sensor's idle level at boot, so active-low and active-high modules both work. Keep the area in front of the sensor clear while the ESP32 starts.
 
 ## LCD display
 

@@ -4,17 +4,23 @@
  * An LDR decides whether it is day or night. An IR obstacle sensor detects a
  * car/object passing underneath. At night the LED turns on while the object
  * is under the sensor and turns off once it has passed. During the day the
- * LED stays off no matter what the IR sensor sees. A 16x2 I2C LCD shows the
+ * LED stays off no matter what the IR sensor sees. An I2C display shows the
  * current mode, light level, detection state and LED state.
  *
  * Hardware: ESP32 DevKit V1, IR obstacle sensor module, LDR + 10k resistor,
- *           LED + 220R resistor, 16x2 LCD with I2C (PCF8574) backpack.
+ *           LED + 220R resistor, and EITHER display:
+ *             - 0.96" SSD1306 128x64 I2C OLED (address 0x3C / 0x3D), or
+ *             - 16x2 LCD with I2C (PCF8574) backpack (address 0x27 / 0x3F).
+ *           The display type is detected automatically from its I2C address.
  *
- * No LCD library is needed: the small driver below talks to the I2C backpack
- * directly using Wire.h, so LiquidCrystal_I2C version conflicts don't matter.
+ * Libraries (Library Manager): "Adafruit SSD1306" and "Adafruit GFX Library".
+ * The 16x2 LCD needs no library: the small driver below talks to the I2C
+ * backpack directly, so LiquidCrystal_I2C version conflicts don't matter.
  */
 
 #include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 // ---------------- Pins ----------------
 const int IR_PIN  = 35;  // IR sensor OUT (digital, input-only pin)
@@ -47,7 +53,10 @@ const unsigned long OBJECT_CLEAR_MS = 300;
 
 const unsigned long LDR_SAMPLE_MS  = 100;
 const unsigned long LCD_REFRESH_MS = 250;
-const unsigned long LCD_RETRY_MS   = 3000;  // look for the LCD again if missing
+const unsigned long LCD_RETRY_MS   = 3000;  // look for the display again if missing
+
+const int OLED_WIDTH  = 128;
+const int OLED_HEIGHT = 64;  // set to 32 for a 128x32 OLED
 
 // ---------------- Minimal I2C LCD driver (PCF8574 + HD44780) ----------------
 // Backpack pin mapping: P0=RS, P1=RW, P2=EN, P3=backlight, P4..P7=D4..D7
@@ -55,7 +64,14 @@ const uint8_t LCD_RS = 0x01;
 const uint8_t LCD_EN = 0x04;
 const uint8_t LCD_BACKLIGHT = 0x08;
 
-uint8_t lcdAddress = 0;  // 0 = no LCD found
+// ---------------- Display detection ----------------
+enum DisplayType { DISPLAY_NONE, DISPLAY_LCD, DISPLAY_OLED };
+DisplayType displayType = DISPLAY_NONE;
+uint8_t displayAddress = 0;
+
+Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
+
+uint8_t lcdAddress = 0;  // address used by the 16x2 LCD driver
 
 bool i2cDevicePresent(uint8_t address) {
   Wire.beginTransmission(address);
@@ -64,8 +80,9 @@ bool i2cDevicePresent(uint8_t address) {
 
 uint8_t findLcdAddress() {
   // Common addresses first, then the rest of the PCF8574 / PCF8574A ranges.
+  // 0x3C and 0x3D are left out: those are OLED addresses.
   const uint8_t candidates[] = {0x27, 0x3F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26,
-                                0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E};
+                                0x38, 0x39, 0x3A, 0x3B, 0x3E};
   for (uint8_t address : candidates) {
     if (i2cDevicePresent(address)) return address;
   }
@@ -136,6 +153,35 @@ bool lcdBegin() {
   return true;
 }
 
+// Find and start whichever display is connected.
+bool displayBegin() {
+  const uint8_t oledAddresses[] = {0x3C, 0x3D};
+  for (uint8_t address : oledAddresses) {
+    if (i2cDevicePresent(address) && oled.begin(SSD1306_SWITCHCAPVCC, address)) {
+      displayType = DISPLAY_OLED;
+      displayAddress = address;
+      oled.clearDisplay();
+      oled.setTextColor(SSD1306_WHITE);
+      oled.display();
+      return true;
+    }
+  }
+  if (lcdBegin()) {
+    displayType = DISPLAY_LCD;
+    displayAddress = lcdAddress;
+    return true;
+  }
+  displayType = DISPLAY_NONE;
+  displayAddress = 0;
+  return false;
+}
+
+const char *displayName() {
+  if (displayType == DISPLAY_OLED) return "OLED";
+  if (displayType == DISPLAY_LCD) return "LCD";
+  return "NONE";
+}
+
 // ---------------- State ----------------
 bool isNight = false;
 bool objectPresent = false;
@@ -165,19 +211,32 @@ bool irDetects() {
 }
 
 void showSplash() {
-  lcdSetCursor(0, 0);
-  lcdPrint("  Smart Street  ");
-  lcdSetCursor(0, 1);
-  lcdPrint("  Light System  ");
-  delay(1500);
-  lcdClear();
+  if (displayType == DISPLAY_OLED) {
+    oled.clearDisplay();
+    oled.setTextSize(2);
+    oled.setCursor(4, 8);
+    oled.print("SMART");
+    oled.setCursor(4, 28);
+    oled.print("STREET");
+    oled.setCursor(4, 48);
+    oled.print("LIGHT");
+    oled.display();
+    delay(1500);
+  } else if (displayType == DISPLAY_LCD) {
+    lcdSetCursor(0, 0);
+    lcdPrint("  Smart Street  ");
+    lcdSetCursor(0, 1);
+    lcdPrint("  Light System  ");
+    delay(1500);
+    lcdClear();
+  }
 }
 
-void retryLcd(unsigned long now) {
-  if (lcdAddress || now - lastLcdRetryMs < LCD_RETRY_MS) return;
+void retryDisplay(unsigned long now) {
+  if (displayType != DISPLAY_NONE || now - lastLcdRetryMs < LCD_RETRY_MS) return;
   lastLcdRetryMs = now;
-  if (lcdBegin()) {
-    Serial.printf(">> LCD connected at 0x%02X\n", lcdAddress);
+  if (displayBegin()) {
+    Serial.printf(">> %s connected at 0x%02X\n", displayName(), displayAddress);
     showSplash();
   }
 }
@@ -217,9 +276,41 @@ void setLed(bool on) {
   Serial.println(on ? ">> LED ON" : ">> LED OFF");
 }
 
+void updateOled() {
+  char text[22];
+  oled.clearDisplay();
+
+  oled.setTextSize(1);
+  oled.setCursor(0, 0);
+  oled.print("SMART STREET LIGHT");
+
+  oled.setTextSize(2);
+  oled.setCursor(0, 12);
+  oled.print(isNight ? "NIGHT" : "DAY");
+
+  oled.setTextSize(1);
+  snprintf(text, sizeof(text), "Light : %d", lightLevel);
+  oled.setCursor(0, 32);
+  oled.print(text);
+  snprintf(text, sizeof(text), "Object: %s", objectPresent ? "YES" : "NO");
+  oled.setCursor(0, 42);
+  oled.print(text);
+  snprintf(text, sizeof(text), "LED   : %-3s  Cars:%lu", ledOn ? "ON" : "OFF", passCount);
+  oled.setCursor(0, 52);
+  oled.print(text);
+
+  oled.display();
+}
+
 void updateLcd(unsigned long now) {
   if (now - lastLcdMs < LCD_REFRESH_MS) return;
   lastLcdMs = now;
+
+  if (displayType == DISPLAY_OLED) {
+    updateOled();
+    return;
+  }
+  if (displayType != DISPLAY_LCD) return;
 
   char line1[17];
   char line2[17];
@@ -250,12 +341,12 @@ void setup() {
   Serial.println("===== Smart Street Light starting =====");
 
   Wire.begin(SDA_PIN, SCL_PIN);
-  if (lcdBegin()) {
-    Serial.printf("LCD found at 0x%02X\n", lcdAddress);
+  if (displayBegin()) {
+    Serial.printf("%s display found at 0x%02X\n", displayName(), displayAddress);
     showSplash();
   } else {
-    // Keep running without the LCD so the street light still works.
-    Serial.println("LCD NOT FOUND - check SDA=D21, SCL=D22, VCC=VIN(5V), GND");
+    // Keep running without a display so the street light still works.
+    Serial.println("DISPLAY NOT FOUND - check SDA=D21, SCL=D22, VCC, GND");
   }
 
   // Learn what the IR sensor outputs when nothing is in front of it.
@@ -294,20 +385,15 @@ void loop() {
   setLed(isNight && objectPresent);
 
   updateLcd(now);
-  retryLcd(now);
+  retryDisplay(now);
 
   if (now - lastLogMs >= 1000) {
     lastLogMs = now;
-    char lcdStatus[8];
-    if (lcdAddress) {
-      snprintf(lcdStatus, sizeof(lcdStatus), "0x%02X", lcdAddress);
-    } else {
-      snprintf(lcdStatus, sizeof(lcdStatus), "NONE");
-    }
     Serial.printf("Light:%4d (raw %4d)  Mode:%-5s  IRpin:%s  Object:%-3s  LED:%-3s  "
-                  "Passed:%lu  LCD:%s\n",
+                  "Passed:%lu  Display:%s 0x%02X\n",
                   lightLevel, ldrRaw, isNight ? "NIGHT" : "DAY",
                   digitalRead(IR_PIN) == HIGH ? "HIGH" : "LOW",
-                  objectPresent ? "YES" : "NO", ledOn ? "ON" : "OFF", passCount, lcdStatus);
+                  objectPresent ? "YES" : "NO", ledOn ? "ON" : "OFF", passCount,
+                  displayName(), displayAddress);
   }
 }
