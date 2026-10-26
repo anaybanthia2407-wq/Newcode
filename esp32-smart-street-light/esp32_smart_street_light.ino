@@ -24,8 +24,12 @@ const int SDA_PIN = 21;  // LCD SDA
 const int SCL_PIN = 22;  // LCD SCL
 
 // ---------------- Settings ----------------
-// Most IR obstacle modules pull OUT LOW when something is detected.
-const bool IR_ACTIVE_LOW = true;
+// IR sensor direction is detected automatically at startup: whatever the
+// sensor outputs while NOTHING is in front of it is taken as "no object".
+// Keep the area in front of the IR sensor clear while the ESP32 boots.
+// Set IR_AUTO_DETECT to false to use IR_ACTIVE_LOW instead.
+const bool IR_AUTO_DETECT = true;
+const bool IR_ACTIVE_LOW = true;  // most modules pull OUT LOW on detection
 
 // LDR reading is 0..4095. With a bare LDR (LDR to 3V3, 10k to GND)
 // a BRIGHTER room gives a HIGHER reading. If you use an LDR module
@@ -43,6 +47,7 @@ const unsigned long OBJECT_CLEAR_MS = 300;
 
 const unsigned long LDR_SAMPLE_MS  = 100;
 const unsigned long LCD_REFRESH_MS = 250;
+const unsigned long LCD_RETRY_MS   = 3000;  // look for the LCD again if missing
 
 // ---------------- Minimal I2C LCD driver (PCF8574 + HD44780) ----------------
 // Backpack pin mapping: P0=RS, P1=RW, P2=EN, P3=backlight, P4..P7=D4..D7
@@ -141,6 +146,9 @@ unsigned long lastSeenMs = 0;
 unsigned long lastLdrMs = 0;
 unsigned long lastLcdMs = 0;
 unsigned long lastLogMs = 0;
+unsigned long lastLcdRetryMs = 0;
+int ldrRaw = 0;
+int irIdleLevel = HIGH;  // IR pin level when nothing is in front of it
 
 int readLightLevel() {
   // Average several samples to smooth out ADC noise.
@@ -148,13 +156,30 @@ int readLightLevel() {
   for (int i = 0; i < 16; i++) {
     sum += analogRead(LDR_PIN);
   }
-  int value = sum / 16;
-  return LDR_INVERTED ? 4095 - value : value;
+  ldrRaw = sum / 16;
+  return LDR_INVERTED ? 4095 - ldrRaw : ldrRaw;
 }
 
 bool irDetects() {
-  int raw = digitalRead(IR_PIN);
-  return IR_ACTIVE_LOW ? raw == LOW : raw == HIGH;
+  return digitalRead(IR_PIN) != irIdleLevel;
+}
+
+void showSplash() {
+  lcdSetCursor(0, 0);
+  lcdPrint("  Smart Street  ");
+  lcdSetCursor(0, 1);
+  lcdPrint("  Light System  ");
+  delay(1500);
+  lcdClear();
+}
+
+void retryLcd(unsigned long now) {
+  if (lcdAddress || now - lastLcdRetryMs < LCD_RETRY_MS) return;
+  lastLcdRetryMs = now;
+  if (lcdBegin()) {
+    Serial.printf(">> LCD connected at 0x%02X\n", lcdAddress);
+    showSplash();
+  }
 }
 
 void updateDayNight(unsigned long now) {
@@ -220,24 +245,43 @@ void setup() {
   analogReadResolution(12);
   analogSetPinAttenuation(LDR_PIN, ADC_11db);  // full 0-3.3V range
 
+  delay(500);
+  Serial.println();
+  Serial.println("===== Smart Street Light starting =====");
+
   Wire.begin(SDA_PIN, SCL_PIN);
   if (lcdBegin()) {
     Serial.printf("LCD found at 0x%02X\n", lcdAddress);
-    lcdSetCursor(0, 0);
-    lcdPrint("  Smart Street  ");
-    lcdSetCursor(0, 1);
-    lcdPrint("  Light System  ");
-    delay(1500);
-    lcdClear();
+    showSplash();
   } else {
     // Keep running without the LCD so the street light still works.
-    Serial.println("LCD not found - check SDA=21, SCL=22, VCC and GND wiring");
+    Serial.println("LCD NOT FOUND - check SDA=D21, SCL=D22, VCC=VIN(5V), GND");
+  }
+
+  // Learn what the IR sensor outputs when nothing is in front of it.
+  if (IR_AUTO_DETECT) {
+    int lowCount = 0;
+    for (int i = 0; i < 50; i++) {
+      if (digitalRead(IR_PIN) == LOW) lowCount++;
+      delay(10);
+    }
+    irIdleLevel = lowCount > 25 ? LOW : HIGH;
+    Serial.printf("IR idle level = %s (object detected when %s)\n",
+                  irIdleLevel == HIGH ? "HIGH" : "LOW",
+                  irIdleLevel == HIGH ? "LOW" : "HIGH");
+  } else {
+    irIdleLevel = IR_ACTIVE_LOW ? HIGH : LOW;
   }
 
   // Decide day/night straight away instead of waiting for the first sample.
   lightLevel = readLightLevel();
   isNight = lightLevel < NIGHT_THRESHOLD;
   Serial.printf("Start: light=%d mode=%s\n", lightLevel, isNight ? "NIGHT" : "DAY");
+  if (ldrRaw == 0 || ldrRaw >= 4095) {
+    Serial.println("WARNING: LDR reads 0 or 4095 - check LDR wiring to D32 "
+                   "(module: use the AO pin, not DO)");
+  }
+  Serial.println("========================================");
 }
 
 void loop() {
@@ -250,11 +294,20 @@ void loop() {
   setLed(isNight && objectPresent);
 
   updateLcd(now);
+  retryLcd(now);
 
   if (now - lastLogMs >= 1000) {
     lastLogMs = now;
-    Serial.printf("Light:%4d  Mode:%-5s  Object:%-3s  LED:%-3s  Passed:%lu\n",
-                  lightLevel, isNight ? "NIGHT" : "DAY",
-                  objectPresent ? "YES" : "NO", ledOn ? "ON" : "OFF", passCount);
+    char lcdStatus[8];
+    if (lcdAddress) {
+      snprintf(lcdStatus, sizeof(lcdStatus), "0x%02X", lcdAddress);
+    } else {
+      snprintf(lcdStatus, sizeof(lcdStatus), "NONE");
+    }
+    Serial.printf("Light:%4d (raw %4d)  Mode:%-5s  IRpin:%s  Object:%-3s  LED:%-3s  "
+                  "Passed:%lu  LCD:%s\n",
+                  lightLevel, ldrRaw, isNight ? "NIGHT" : "DAY",
+                  digitalRead(IR_PIN) == HIGH ? "HIGH" : "LOW",
+                  objectPresent ? "YES" : "NO", ledOn ? "ON" : "OFF", passCount, lcdStatus);
   }
 }
