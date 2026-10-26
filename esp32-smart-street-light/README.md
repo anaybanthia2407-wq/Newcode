@@ -60,7 +60,7 @@ The LCD needs 5V for proper contrast, so power it from VIN while the board is on
 
 1. Install the ESP32 board package (File > Preferences > Additional Board Manager URLs):
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-2. Install the **LiquidCrystal I2C** library (by Frank de Brabander) from Library Manager.
+2. No extra libraries are needed. The sketch drives the I2C LCD itself using the built-in `Wire` library, so it is not affected by conflicting LiquidCrystal_I2C versions.
 3. Select board **ESP32 Dev Module** and the correct COM port, then upload `esp32_smart_street_light.ino`.
 
 ## Calibration
@@ -79,7 +79,7 @@ These values are at the top of the sketch:
 - `LDR_INVERTED`: set to `true` if your LDR reading goes down as the light gets brighter.
 - `NIGHT_THRESHOLD` / `DAY_THRESHOLD`: the day/night switching points, with hysteresis between them.
 - `OBJECT_CLEAR_MS`: how long the IR sensor must see nothing before the object counts as passed and the LED turns off (default 300 ms). This stops the light flickering in gaps along a car.
-- `LCD_ADDRESS`: `0x27` by default. Try `0x3F` if the LCD stays blank.
+- LCD address: detected automatically (0x27, 0x3F, etc.) and printed on Serial Monitor at startup. If it prints "LCD not found", check the SDA/SCL/VCC/GND wiring.
 
 ## LCD display
 
