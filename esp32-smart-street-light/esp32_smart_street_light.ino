@@ -7,7 +7,8 @@
  * LED stays off no matter what the IR sensor sees. An I2C display shows the
  * current mode, light level, detection state and LED state.
  *
- * Hardware: ESP32 DevKit V1, IR obstacle sensor module, LDR + 10k resistor,
+ * Hardware: ESP32 DevKit V1, IR obstacle sensor module, LDR module (DO pin)
+ *           or bare LDR + 10k resistor,
  *           LED + 220R resistor, and EITHER display:
  *             - 0.96" SSD1306 128x64 I2C OLED (address 0x3C / 0x3D), or
  *             - 16x2 LCD with I2C (PCF8574) backpack (address 0x27 / 0x3F).
@@ -24,7 +25,7 @@
 
 // ---------------- Pins ----------------
 const int IR_PIN  = 35;  // IR sensor OUT (digital, input-only pin)
-const int LDR_PIN = 32;  // LDR voltage divider (ADC1)
+const int LDR_PIN = 32;  // LDR module DO (or AO / bare LDR divider)
 const int LED_PIN = 18;  // Street light LED (through 220R)
 const int SDA_PIN = 21;  // LCD SDA
 const int SCL_PIN = 22;  // LCD SCL
@@ -37,12 +38,28 @@ const int SCL_PIN = 22;  // LCD SCL
 const bool IR_AUTO_DETECT = true;
 const bool IR_ACTIVE_LOW = true;  // most modules pull OUT LOW on detection
 
-// LDR reading is 0..4095. With a bare LDR (LDR to 3V3, 10k to GND)
+// LDR type:
+//   true  = 3-pin LDR module (VCC, GND, DO). DO only says DARK or BRIGHT;
+//           set the day/night switching point with the module's blue pot.
+//   false = bare LDR + 10k divider, or a 4-pin module using its AO pin.
+const bool LDR_DIGITAL = true;
+
+// Digital (DO) mode: most LDR modules drive DO HIGH when it is dark
+// (the DO LED on the module turns off). If day/night come out swapped,
+// set this to false.
+const bool LDR_DO_HIGH_WHEN_DARK = true;
+
+// Digital (DO) mode: DO must stay the same for this long before the mode
+// changes, so a passing car's headlights don't flip night to day.
+const unsigned long LDR_STABLE_MS = 500;
+
+// Analog mode: reading is 0..4095. With a bare LDR (LDR to 3V3, 10k to GND)
 // a BRIGHTER room gives a HIGHER reading. If you use an LDR module
 // whose AO goes DOWN in bright light, set this to true.
 const bool LDR_INVERTED = false;
 
-// Day/night thresholds with hysteresis so the mode doesn't flicker at dusk.
+// Analog mode: day/night thresholds with hysteresis so the mode doesn't
+// flicker at dusk.
 // Calibrate using the "Light:" value printed on Serial Monitor / LCD.
 const int NIGHT_THRESHOLD = 1200;  // go to NIGHT when light falls below this
 const int DAY_THRESHOLD   = 1600;  // go back to DAY when light rises above this
@@ -195,8 +212,18 @@ unsigned long lastLogMs = 0;
 unsigned long lastLcdRetryMs = 0;
 int ldrRaw = 0;
 int irIdleLevel = HIGH;  // IR pin level when nothing is in front of it
+bool ldrChangePending = false;
+unsigned long ldrChangeSinceMs = 0;
 
+// Returns 0..4095 (higher = brighter). In digital mode this is 0 for DARK
+// and 4095 for BRIGHT, so the same night/day thresholds work for both.
 int readLightLevel() {
+  if (LDR_DIGITAL) {
+    ldrRaw = digitalRead(LDR_PIN);
+    bool dark = (ldrRaw == HIGH) == LDR_DO_HIGH_WHEN_DARK;
+    return dark ? 0 : 4095;
+  }
+
   // Average several samples to smooth out ADC noise.
   long sum = 0;
   for (int i = 0; i < 16; i++) {
@@ -246,6 +273,25 @@ void updateDayNight(unsigned long now) {
   lastLdrMs = now;
 
   lightLevel = readLightLevel();
+
+  if (LDR_DIGITAL) {
+    bool darkNow = lightLevel < NIGHT_THRESHOLD;
+    if (darkNow == isNight) {
+      ldrChangePending = false;
+      return;
+    }
+    if (!ldrChangePending) {
+      ldrChangePending = true;
+      ldrChangeSinceMs = now;
+      return;
+    }
+    if (now - ldrChangeSinceMs < LDR_STABLE_MS) return;
+    ldrChangePending = false;
+    isNight = darkNow;
+    Serial.println(isNight ? ">> Night detected" : ">> Day detected");
+    return;
+  }
+
   if (!isNight && lightLevel < NIGHT_THRESHOLD) {
     isNight = true;
     Serial.println(">> Night detected");
@@ -276,6 +322,14 @@ void setLed(bool on) {
   Serial.println(on ? ">> LED ON" : ">> LED OFF");
 }
 
+// Light reading as text: "DARK"/"BRIGHT" for a DO module, else the number.
+const char *lightText() {
+  static char text[8];
+  if (LDR_DIGITAL) return lightLevel < NIGHT_THRESHOLD ? "DARK" : "BRIGHT";
+  snprintf(text, sizeof(text), "%d", lightLevel);
+  return text;
+}
+
 void updateOled() {
   char text[22];
   oled.clearDisplay();
@@ -289,7 +343,7 @@ void updateOled() {
   oled.print(isNight ? "NIGHT" : "DAY");
 
   oled.setTextSize(1);
-  snprintf(text, sizeof(text), "Light : %d", lightLevel);
+  snprintf(text, sizeof(text), "Light : %s", lightText());
   oled.setCursor(0, 32);
   oled.print(text);
   snprintf(text, sizeof(text), "Object: %s", objectPresent ? "YES" : "NO");
@@ -315,8 +369,12 @@ void updateLcd(unsigned long now) {
   char line1[17];
   char line2[17];
   // Both lines are padded to exactly 16 characters so old text is overwritten.
-  // "NIGHT Light:1234" / "Obj:YES LED:OFF "
-  snprintf(line1, sizeof(line1), "%-5s Light:%-4d", isNight ? "NIGHT" : "DAY", lightLevel);
+  // "NIGHT Light:1234" (or "NIGHT Lt:BRIGHT") / "Obj:YES LED:OFF "
+  if (LDR_DIGITAL) {
+    snprintf(line1, sizeof(line1), "%-5s Lt:%-7s", isNight ? "NIGHT" : "DAY", lightText());
+  } else {
+    snprintf(line1, sizeof(line1), "%-5s Light:%-4d", isNight ? "NIGHT" : "DAY", lightLevel);
+  }
   snprintf(line2, sizeof(line2), "Obj:%-3s LED:%-4s",
            objectPresent ? "YES" : "NO", ledOn ? "ON" : "OFF");
 
@@ -332,7 +390,7 @@ void setup() {
   pinMode(IR_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
-  pinMode(LDR_PIN, INPUT);
+  pinMode(LDR_PIN, INPUT);  // module drives DO itself, no pull-up needed
   analogReadResolution(12);
   analogSetPinAttenuation(LDR_PIN, ADC_11db);  // full 0-3.3V range
 
@@ -367,8 +425,8 @@ void setup() {
   // Decide day/night straight away instead of waiting for the first sample.
   lightLevel = readLightLevel();
   isNight = lightLevel < NIGHT_THRESHOLD;
-  Serial.printf("Start: light=%d mode=%s\n", lightLevel, isNight ? "NIGHT" : "DAY");
-  if (ldrRaw == 0 || ldrRaw >= 4095) {
+  Serial.printf("Start: light=%s mode=%s\n", lightText(), isNight ? "NIGHT" : "DAY");
+  if (!LDR_DIGITAL && (ldrRaw == 0 || ldrRaw >= 4095)) {
     Serial.println("WARNING: LDR reads 0 or 4095 - check LDR wiring to D32 "
                    "(module: use the AO pin, not DO)");
   }
@@ -389,9 +447,15 @@ void loop() {
 
   if (now - lastLogMs >= 1000) {
     lastLogMs = now;
-    Serial.printf("Light:%4d (raw %4d)  Mode:%-5s  IRpin:%s  Object:%-3s  LED:%-3s  "
+    char ldrInfo[24];
+    if (LDR_DIGITAL) {
+      snprintf(ldrInfo, sizeof(ldrInfo), "DOpin:%s", ldrRaw == HIGH ? "HIGH" : "LOW");
+    } else {
+      snprintf(ldrInfo, sizeof(ldrInfo), "raw %4d", ldrRaw);
+    }
+    Serial.printf("Light:%-6s (%s)  Mode:%-5s  IRpin:%s  Object:%-3s  LED:%-3s  "
                   "Passed:%lu  Display:%s 0x%02X\n",
-                  lightLevel, ldrRaw, isNight ? "NIGHT" : "DAY",
+                  lightText(), ldrInfo, isNight ? "NIGHT" : "DAY",
                   digitalRead(IR_PIN) == HIGH ? "HIGH" : "LOW",
                   objectPresent ? "YES" : "NO", ledOn ? "ON" : "OFF", passCount,
                   displayName(), displayAddress);

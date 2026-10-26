@@ -41,7 +41,9 @@ GND ─────────────┘
 ```
 More light gives a higher reading (0–4095).
 
-> Using an LDR **module** (VCC/GND/AO/DO) instead? Connect AO to GPIO32 and set `LDR_INVERTED = true`, since most modules output a lower voltage in bright light.
+> **3-pin LDR module (VCC, GND, DO)** — the default in the sketch (`LDR_DIGITAL = true`): VCC → 3V3, GND → GND, DO → GPIO32. DO only reports DARK or BRIGHT; turn the module's blue potentiometer to set how dark it must get before NIGHT mode. If day/night come out swapped, set `LDR_DO_HIGH_WHEN_DARK = false`.
+>
+> **Bare LDR (as drawn above) or 4-pin module using AO:** set `LDR_DIGITAL = false`. For a module's AO pin, also set `LDR_INVERTED = true`, since most modules output a lower voltage in bright light.
 
 ### LED
 ```
