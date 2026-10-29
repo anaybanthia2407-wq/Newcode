@@ -23,7 +23,8 @@
 
   Required libraries (install via Arduino Library Manager):
     - ESP32Servo         (by Kevin Harrington)
-    - LiquidCrystal I2C  (by Frank de Brabander)
+    - LiquidCrystal I2C  (Frank de Brabander's GitHub version,
+                          "Arduino-LiquidCrystal-I2C-library", which uses lcd.begin())
 */
 
 #include <Wire.h>
@@ -227,7 +228,9 @@ void setup() {
   analogReadResolution(12);
 
   // LCD uses the default ESP32 I2C pins: SDA = GPIO21, SCL = GPIO22.
-  lcd.init();
+  // This library takes the size from the constructor, so begin() has no arguments.
+  // (The older Library Manager version calls this lcd.init() instead.)
+  lcd.begin();
   lcd.backlight();
   showStatus("ESP32 Sun", "Tracker ready");
 

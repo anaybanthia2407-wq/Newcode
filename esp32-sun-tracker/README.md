@@ -142,7 +142,8 @@ An LDR only measures brightness, so it cannot tell the sun from a phone flashlig
    `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
 2. Install libraries via Library Manager:
    - `ESP32Servo` by Kevin Harrington (use version 3.x if your ESP32 board package is 3.x)
-   - `LiquidCrystal I2C` by Frank de Brabander. The IDE may warn that it "may be incompatible with esp32"; it works fine.
+   - `LiquidCrystal I2C` by Frank de Brabander, from GitHub: `fdebrabander/Arduino-LiquidCrystal-I2C-library` (Code > Download ZIP, then Sketch > Include Library > Add .ZIP Library). The sketch uses this version's `lcd.begin()`. The IDE may warn that it "may be incompatible with esp32"; it works fine.
+   - Keep only **one** `LiquidCrystal_I2C` library installed. If you also have the Library Manager version (folder `LiquidCrystal_I2C`), the IDE may pick either one. If it picks the Library Manager version, change `lcd.begin();` to `lcd.init();`.
 3. Select board **ESP32 Dev Module** and the correct COM port.
 4. Open `esp32_sun_tracker.ino` and upload. If the upload stalls at `Connecting...`, hold the **BOOT** button until it starts.
 
@@ -179,6 +180,8 @@ Other settings at the top of the sketch:
 | Problem | Fix |
 |---------|-----|
 | LCD backlight on, no text | Turn the blue contrast screw on the back of the LCD. Then try `LCD_ADDRESS = 0x3F`. |
+| `'class LiquidCrystal_I2C' has no member named 'begin'` | You're using the Library Manager version of the library. Change `lcd.begin();` to `lcd.init();`, or install the GitHub version listed in setup. |
+| `'class LiquidCrystal_I2C' has no member named 'init'` | You're using the GitHub version. The sketch should say `lcd.begin();`, not `lcd.init();`. |
 | LCD blank, no backlight | Check VCC is on VIN (5V), not 3V3, and that SDA/SCL aren't swapped. |
 | Reading is always ~0 or ~4095 | The LDR divider is miswired. The LDR goes to 3V3, the 10 kΩ to GND, and GPIO34 to the point between them. |
 | Brighter light gives a *lower* reading | The LDR and the 10 kΩ resistor are swapped. Swap them back. |
