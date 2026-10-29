@@ -21,8 +21,8 @@
     LED      : GPIO26 -> 220 ohm resistor -> LED anode (+), LED cathode (-) -> GND
     LCD I2C  : VCC -> VIN (5V), GND -> GND, SDA -> GPIO21, SCL -> GPIO22
 
-  Required libraries (install via Arduino Library Manager):
-    - ESP32Servo         (by Kevin Harrington)
+  Required libraries:
+    - ESP32Servo         (by Kevin Harrington, from the Library Manager)
     - LiquidCrystal I2C  (Frank de Brabander's GitHub version,
                           "Arduino-LiquidCrystal-I2C-library", which uses lcd.begin())
 */
