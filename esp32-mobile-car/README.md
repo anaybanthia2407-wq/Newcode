@@ -80,7 +80,7 @@ All six motor pins are on the same side of the DevKit V1 header, which keeps wir
 - **Set the buck converter to 5.0 V with a multimeter before connecting the ESP32.** Many come set to a higher voltage, which would damage the board.
 - **No buck converter?** Leave the L298N's 5V-EN jumper on and wire L298N **+5V** to ESP32 **VIN** instead. It works, but with 4 motors expect more resets on hard starts.
 - **Check each pair before final wiring.** Briefly touch each motor to the battery. The front and rear motor on the same side must spin the same direction, so the wheels don't fight each other. If one is backwards, swap that motor's two wires.
-- 4-wheel cars turn by skidding, which needs more power than a 2-wheel car. If it struggles to spin in place (especially on carpet), raise `MIN_DUTY` to about 110–130.
+- 4-wheel cars turn by skidding, which needs more power than a 2-wheel car. If it struggles to spin in place (especially on carpet), raise `MIN_DUTY` (default 110) toward 130.
 - **Don't plug in USB while the battery is on** unless you remove the 5V→VIN wire. Otherwise two supplies fight each other.
 - If a motor spins the wrong way, swap its two wires or set `LEFT_INVERT` / `RIGHT_INVERT = true` in the code.
 
@@ -117,7 +117,7 @@ All six motor pins are on the same side of the DevKit V1 header, which keeps wir
 
 | Symptom | Fix |
 |---------|-----|
-| Motors hum but wheels don't turn at low speed | Raise `MIN_DUTY` (try 110–130). The L298N drops about 2 V, so use 2 × 18650 rather than 4 × AA. |
+| Motors hum but wheels don't turn at low speed | Raise `MIN_DUTY` (default 110; try up to 130). The L298N drops about 2 V, so use 2 × 18650 rather than 4 × AA. |
 | ESP32 resets/reboots when the motors start | Brown-out: add the 1000 µF capacitor, use fresh or charged cells, or power the ESP32 from a separate buck converter. Also lower `RAMP_UP`. |
 | Car doesn't drive straight | Motors are never identical. Scale one side down slightly in `setDrive()` (e.g. `r = r * 95 / 100`), or add wheel encoders (see upgrades). |
 | Turning is too twitchy | Lower the speed slider, or scale `x` in `setDrive()` (e.g. `x = x * 60 / 100`). |

@@ -5,6 +5,8 @@
   http://192.168.4.1 in the browser and drive with the on-screen joystick.
   No app install and no router needed.
 
+  Drive: 4WD - the two left motors are wired in parallel to OUT1/OUT2 and
+  the two right motors in parallel to OUT3/OUT4 (also works as 2WD).
   Motor driver: L298N (default) or TB6612FNG - same pin logic.
   Library needed: "WebSockets" by Markus Sattler (Arduino Library Manager).
   Works with ESP32 Arduino core 2.x and 3.x.
@@ -45,7 +47,7 @@ const bool RIGHT_INVERT = false;
 // Tuning
 const uint32_t PWM_FREQ    = 1000;  // Hz. L298N: 1-5 kHz. TB6612FNG: up to 20 kHz (silent)
 const uint8_t  PWM_RES     = 8;     // bits -> duty 0..255
-const int      MIN_DUTY    = 90;    // below this TT motors only hum; raise if wheels don't start
+const int      MIN_DUTY    = 110;   // below this the motors only hum. 4WD: 110-130, 2WD: ~90
 const int      DEADZONE    = 8;     // joystick % ignored around the centre
 const int      RAMP_UP     = 10;    // duty change per tick when speeding up
 const int      RAMP_DOWN   = 25;    // duty change per tick when slowing down
