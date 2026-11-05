@@ -1,6 +1,6 @@
 # ESP32 Mobile-Controlled Car
 
-A 2WD (or 4WD) robot car driven from your phone's browser. The ESP32 DevKit V1 creates its own Wi-Fi hotspot and serves a control page with a touch joystick, speed slider, headlights, horn and an emergency STOP. You don't need to install an app or have a router.
+A 4WD (or 2WD) robot car driven from your phone's browser. The ESP32 DevKit V1 creates its own Wi-Fi hotspot and serves a control page with a touch joystick, speed slider, headlights, horn and an emergency STOP. You don't need to install an app or have a router.
 
 ```
  Phone (browser)  ──Wi-Fi──►  ESP32 DevKit V1  ──PWM + direction──►  L298N  ──►  DC gear motors
@@ -17,24 +17,34 @@ A 2WD (or 4WD) robot car driven from your phone's browser. The ESP32 DevKit V1 c
 
 ## Materials required
 
+This list is for the **4-wheel (4WD)** build: four motors, with the two on each side wired together.
+
 | # | Item | Qty | Notes | Approx. cost (₹) |
 |---|------|-----|-------|-----------------|
 | 1 | ESP32 DevKit V1 (30-pin) | 1 | The controller | 350–450 |
-| 2 | L298N motor driver module | 1 | Or **TB6612FNG** (better, see upgrades) | 120–180 |
-| 3 | 2WD robot chassis kit | 1 | Includes 2 × TT gear motors (3–6 V), 2 wheels, a caster wheel and screws. A 4WD kit also works. | 250–450 |
-| 4 | 18650 Li-ion cells (protected) | 2 | 2 in series = 7.4 V nominal | 150–250 each |
-| 5 | 2 × 18650 battery holder (series) | 1 | With leads | 40–80 |
-| 6 | SPST rocker/slide switch | 1 | Main power switch | 10–20 |
-| 7 | Jumper wires (M-F, M-M) | ~15 | Female-female for ESP32 to L298N | 60–100 |
-| 8 | Electrolytic capacitor 470–1000 µF, ≥16 V | 1 | Across the battery input, to stop brown-out resets | 10 |
-| 9 | Ceramic capacitor 0.1 µF (104) | 2–4 | Soldered across each motor's terminals to reduce noise | 5 |
-| 10 | Micro-USB data cable | 1 | For programming. Some cables are charge-only and won't work. | — |
-| 11 | 18650 charger | 1 | Never charge Li-ion without a proper charger | 200–400 |
+| 2 | L298N motor driver module (with heatsink) | 1 | One driver runs all 4 motors: 2 motors per channel. Its 2 A per channel handles two TT motors in parallel. | 120–180 |
+| 3 | 4WD robot chassis kit | 1 | 2 acrylic plates, **4 × TT gear motors** (3–6 V, 1:48), **4 wheels**, motor brackets, brass spacers and screws | 450–750 |
+| 4 | 18650 Li-ion cells, **high-drain** (protected) | 2 | 2 in series = 7.4 V. Four motors draw 1–2 A while driving and 4 A+ when starting, so buy genuine ≥10 A cells (e.g. Samsung 25R, LG HG2, Molicel P26A). Avoid fake "9800 mAh" cells. | 200–350 each |
+| 5 | 2 × 18650 battery holder (series) | 1 | With leads, or a 2S holder with a built-in switch | 40–80 |
+| 6 | Rocker/slide switch, rated ≥ 3 A | 1 | Main power switch | 15–30 |
+| 7 | Mini buck converter (MP1584 or LM2596), set to 5 V | 1 | **Recommended for 4WD.** It powers the ESP32 separately so the motors' start-up current can't reset it. | 50–100 |
+| 8 | Electrolytic capacitor 1000 µF, ≥ 16 V | 1 | Across the L298N +12V and GND terminals | 10 |
+| 9 | Ceramic capacitor 0.1 µF (104) | 4 | One soldered across each motor's terminals, to reduce electrical noise | 5 |
+| 10 | Jumper wires (female-female, male-female) | ~15 | ESP32 to L298N signal wires | 60–100 |
+| 11 | Hook-up wire 22 AWG (red and black), ~1 m each | 1 set | Motor and battery wires. Jumper wires are too thin for motor current. | 40–60 |
+| 12 | Heat-shrink tubing / insulation tape | 1 | Insulate the soldered motor joints | 30 |
+| 13 | Zip ties, double-sided foam tape, M3 screws/standoffs | 1 set | Mount the ESP32, L298N and battery on the top plate | 50–80 |
+| 14 | Micro-USB **data** cable | 1 | For programming. Some cables are charge-only and won't work. | — |
+| 15 | 18650 charger | 1 | Never charge Li-ion without a proper charger | 200–400 |
 | *Optional* | White LEDs + 220 Ω resistors | 2 | Headlights | 10 |
 | *Optional* | Active buzzer (3.3–5 V) + BC547/2N2222 + 1 kΩ | 1 | Horn | 20 |
-| *Optional* | Mini buck converter (MP1584 / LM2596) | 1 | Clean 5 V for the ESP32 (recommended) | 50–100 |
+| *Optional* | Mini breadboard (170-point) | 1 | Neat place for the LEDs and buzzer | 30 |
 
-**Tools:** soldering iron and solder, small screwdriver, multimeter, double-sided tape or zip ties, wire stripper.
+**Estimated total:** about ₹2,000–3,000 (without the charger).
+
+**Tools:** soldering iron and solder, small screwdriver set, multimeter (needed to set the buck converter to 5 V), wire stripper/cutter.
+
+> **2WD instead?** Use a 2WD chassis kit (2 motors and a caster wheel). In that case the buck converter is optional, and only 2 × 0.1 µF capacitors are needed.
 
 ## Wiring
 
@@ -52,22 +62,25 @@ A 2WD (or 4WD) robot car driven from your phone's browser. The ESP32 DevKit V1 c
 
 All six motor pins are on the same side of the DevKit V1 header, which keeps wiring tidy. They avoid the ESP32's boot-strapping pins (0, 2, 5, 12, 15) and the input-only pins (34–39), so the motors won't twitch at power-on.
 
-### Motors and power
+### Motors and power (4WD)
 
 ```
- 18650 x2 (7.4V) ─(+)─ Switch ─┬─ L298N +12V
-                               │
-                          [1000µF cap]
-                               │
- 18650 x2 (7.4V) ─(−)──────────┴─ L298N GND ──── ESP32 GND
+ Battery (+) ─ Switch ─┬──────────────┬─ L298N +12V
+                       │              │
+                  [1000µF cap]   Buck IN+   Buck OUT+ (5.0V) ─── ESP32 VIN
+                       │              │
+ Battery (−) ──────────┴──────────────┴─ L298N GND ─── Buck IN−/OUT− ─── ESP32 GND
 
- L298N +5V (5V-EN jumper ON) ───────────────── ESP32 VIN
-
- L298N OUT1/OUT2 ── Left motor      (4WD: both left motors in parallel)
- L298N OUT3/OUT4 ── Right motor     (4WD: both right motors in parallel)
+ L298N OUT1/OUT2 ──┬── Front-left motor
+                   └── Rear-left motor     (wired in parallel)
+ L298N OUT3/OUT4 ──┬── Front-right motor
+                   └── Rear-right motor    (wired in parallel)
 ```
 
-- With the 5V-EN jumper on and a supply of 12 V or less, the L298N's onboard regulator gives 5 V. Feed that to the ESP32 **VIN** pin, not 3V3.
+- **Set the buck converter to 5.0 V with a multimeter before connecting the ESP32.** Many come set to a higher voltage, which would damage the board.
+- **No buck converter?** Leave the L298N's 5V-EN jumper on and wire L298N **+5V** to ESP32 **VIN** instead. It works, but with 4 motors expect more resets on hard starts.
+- **Check each pair before final wiring.** Briefly touch each motor to the battery. The front and rear motor on the same side must spin the same direction, so the wheels don't fight each other. If one is backwards, swap that motor's two wires.
+- 4-wheel cars turn by skidding, which needs more power than a 2-wheel car. If it struggles to spin in place (especially on carpet), raise `MIN_DUTY` to about 110–130.
 - **Don't plug in USB while the battery is on** unless you remove the 5V→VIN wire. Otherwise two supplies fight each other.
 - If a motor spins the wrong way, swap its two wires or set `LEFT_INVERT` / `RIGHT_INVERT = true` in the code.
 
