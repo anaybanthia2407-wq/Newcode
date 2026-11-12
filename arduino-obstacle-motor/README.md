@@ -23,6 +23,8 @@ LCD line 1 always shows the live distance (`Dist: 15.2 cm`). The LED blinks 3 ti
 
 ## Wiring
 
+Open `circuit_diagram.html` in a browser for the full colour-coded circuit diagram.
+
 ### HC-SR04
 | Sensor | Uno |
 |--------|-----|
