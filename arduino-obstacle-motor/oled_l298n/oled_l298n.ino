@@ -64,7 +64,9 @@ const unsigned long ECHO_TIMEOUT = 30000UL;
 enum MotorState { STATE_FULL, STATE_SLOW, STATE_STOP };
 
 MotorState state   = STATE_FULL;
-float distanceCm   = -1;
+float distanceCm   = -1;     // -1 = no echo
+float lastValidCm  = 999;    // last real reading, used when the echo disappears
+bool sensorBlocked = false;  // true when something is too close for the sensor to measure
 uint8_t currentPwm = 0;
 uint8_t targetPwm  = SPEED_FULL;
 
@@ -87,22 +89,35 @@ float readDistanceOnce() {
   return duration * 0.0343 / 2.0;
 }
 
-float readDistance() {               // median of 3 readings
-  float a = readDistanceOnce(); delay(10);
-  float b = readDistanceOnce(); delay(10);
-  float c = readDistanceOnce();
+// Takes 3 readings and returns a safe value:
+//   3 good readings -> the middle one
+//   1-2 good        -> the closest one (safer)
+//   0 good          -> -1 (no echo)
+float readDistance() {
+  float r[3];
+  r[0] = readDistanceOnce(); delay(10);
+  r[1] = readDistanceOnce(); delay(10);
+  r[2] = readDistanceOnce();
 
-  float x = (a < 0) ? 9999 : a;
-  float y = (b < 0) ? 9999 : b;
-  float z = (c < 0) ? 9999 : c;
+  uint8_t good = 0;
+  float closest = 9999;
+  for (uint8_t i = 0; i < 3; i++) {
+    if (r[i] > 0) {
+      good++;
+      if (r[i] < closest) closest = r[i];
+    }
+  }
+  if (good == 0) return -1;
+  if (good < 3) return closest;
 
-  float m = max(min(x, y), min(max(x, y), z));
-  return (m >= 9999) ? -1 : m;
+  float x = r[0], y = r[1], z = r[2];
+  return max(min(x, y), min(max(x, y), z));   // median
 }
 
 // ---------------- State logic ----------------
 MotorState decideState(float d, MotorState prev) {
-  if (d < 0) return STATE_FULL;
+  if (sensorBlocked) return STATE_STOP;   // hand right on the sensor
+  if (d < 0) return STATE_FULL;           // genuinely nothing in front
 
   float stopLimit = (prev == STATE_STOP) ? STOP_DISTANCE_CM + HYSTERESIS_CM : STOP_DISTANCE_CM;
   float slowLimit = (prev != STATE_FULL) ? SLOW_DISTANCE_CM + HYSTERESIS_CM : SLOW_DISTANCE_CM;
@@ -188,7 +203,9 @@ void updateDisplay(unsigned long now) {
   // Distance
   display.setTextSize(2);
   display.setCursor(0, 14);
-  if (distanceCm < 0) {
+  if (sensorBlocked) {
+    display.print(F("< 3 cm"));
+  } else if (distanceCm < 0) {
     display.print(F("--- cm"));
   } else {
     display.print(distanceCm, 1);
@@ -258,6 +275,7 @@ void setup() {
   delay(1500);
 
   distanceCm = readDistance();
+  if (distanceCm > 0) lastValidCm = distanceCm;
   state = decideState(distanceCm, STATE_FULL);
   targetPwm = pwmFor(state);
   startBlink();
@@ -269,6 +287,15 @@ void loop() {
   if (now - lastSensorMs >= SENSOR_MS) {
     lastSensorMs = now;
     distanceCm = readDistance();
+
+    // No echo can mean "nothing in front" OR "hand covering the sensor".
+    // If the last real reading was close, it's the second case -> stop.
+    if (distanceCm < 0) {
+      sensorBlocked = (lastValidCm <= SLOW_DISTANCE_CM);
+    } else {
+      sensorBlocked = (distanceCm < 3.0);   // closer than the sensor can measure well
+      lastValidCm = distanceCm;
+    }
 
     MotorState newState = decideState(distanceCm, state);
     if (newState != state) {
