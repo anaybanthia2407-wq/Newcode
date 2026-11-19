@@ -9,6 +9,12 @@
  *   distance <= 10 cm       -> wheel STOPS
  *   OLED shows distance, status and a speed bar. LED blinks whenever the speed changes.
  *
+ * Power (one 9-12V DC adapter, 1A or more, runs everything - no battery):
+ *   Adapter     -> Arduino DC barrel jack
+ *   Arduino VIN -> L298N 12V terminal
+ *   Arduino GND -> L298N GND terminal
+ *   L298N 5V terminal: leave unconnected
+ *
  * Libraries needed (Arduino IDE > Library Manager):
  *   "Adafruit SSD1306" and "Adafruit GFX Library" (say yes to installing dependencies)
  */
